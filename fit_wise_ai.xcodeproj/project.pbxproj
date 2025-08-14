@@ -6,27 +6,8 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXContainerItemProxy section */
-		62FC59052E4CEBB3009F894B /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 62FC58EB2E4CEBB3009F894B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 62FC58F22E4CEBB3009F894B;
-			remoteInfo = fit_wise_ai;
-		};
-		62FC590F2E4CEBB3009F894B /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 62FC58EB2E4CEBB3009F894B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 62FC58F22E4CEBB3009F894B;
-			remoteInfo = fit_wise_ai;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXFileReference section */
 		62FC58F32E4CEBB3009F894B /* fit_wise_ai.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = fit_wise_ai.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		62FC59042E4CEBB3009F894B /* fit_wise_aiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = fit_wise_aiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		62FC590E2E4CEBB3009F894B /* fit_wise_aiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = fit_wise_aiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -48,34 +29,10 @@
 			path = fit_wise_ai;
 			sourceTree = "<group>";
 		};
-		62FC59072E4CEBB3009F894B /* fit_wise_aiTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = fit_wise_aiTests;
-			sourceTree = "<group>";
-		};
-		62FC59112E4CEBB3009F894B /* fit_wise_aiUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = fit_wise_aiUITests;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		62FC58F02E4CEBB3009F894B /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		62FC59012E4CEBB3009F894B /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		62FC590B2E4CEBB3009F894B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -89,8 +46,6 @@
 			isa = PBXGroup;
 			children = (
 				62FC58F52E4CEBB3009F894B /* fit_wise_ai */,
-				62FC59072E4CEBB3009F894B /* fit_wise_aiTests */,
-				62FC59112E4CEBB3009F894B /* fit_wise_aiUITests */,
 				62FC58F42E4CEBB3009F894B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -99,8 +54,6 @@
 			isa = PBXGroup;
 			children = (
 				62FC58F32E4CEBB3009F894B /* fit_wise_ai.app */,
-				62FC59042E4CEBB3009F894B /* fit_wise_aiTests.xctest */,
-				62FC590E2E4CEBB3009F894B /* fit_wise_aiUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -130,52 +83,6 @@
 			productReference = 62FC58F32E4CEBB3009F894B /* fit_wise_ai.app */;
 			productType = "com.apple.product-type.application";
 		};
-		62FC59032E4CEBB3009F894B /* fit_wise_aiTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 62FC591C2E4CEBB3009F894B /* Build configuration list for PBXNativeTarget "fit_wise_aiTests" */;
-			buildPhases = (
-				62FC59002E4CEBB3009F894B /* Sources */,
-				62FC59012E4CEBB3009F894B /* Frameworks */,
-				62FC59022E4CEBB3009F894B /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				62FC59062E4CEBB3009F894B /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				62FC59072E4CEBB3009F894B /* fit_wise_aiTests */,
-			);
-			name = fit_wise_aiTests;
-			packageProductDependencies = (
-			);
-			productName = fit_wise_aiTests;
-			productReference = 62FC59042E4CEBB3009F894B /* fit_wise_aiTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
-		62FC590D2E4CEBB3009F894B /* fit_wise_aiUITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 62FC591F2E4CEBB3009F894B /* Build configuration list for PBXNativeTarget "fit_wise_aiUITests" */;
-			buildPhases = (
-				62FC590A2E4CEBB3009F894B /* Sources */,
-				62FC590B2E4CEBB3009F894B /* Frameworks */,
-				62FC590C2E4CEBB3009F894B /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				62FC59102E4CEBB3009F894B /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				62FC59112E4CEBB3009F894B /* fit_wise_aiUITests */,
-			);
-			name = fit_wise_aiUITests;
-			packageProductDependencies = (
-			);
-			productName = fit_wise_aiUITests;
-			productReference = 62FC590E2E4CEBB3009F894B /* fit_wise_aiUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -188,14 +95,6 @@
 				TargetAttributes = {
 					62FC58F22E4CEBB3009F894B = {
 						CreatedOnToolsVersion = 16.4;
-					};
-					62FC59032E4CEBB3009F894B = {
-						CreatedOnToolsVersion = 16.4;
-						TestTargetID = 62FC58F22E4CEBB3009F894B;
-					};
-					62FC590D2E4CEBB3009F894B = {
-						CreatedOnToolsVersion = 16.4;
-						TestTargetID = 62FC58F22E4CEBB3009F894B;
 					};
 				};
 			};
@@ -214,28 +113,12 @@
 			projectRoot = "";
 			targets = (
 				62FC58F22E4CEBB3009F894B /* fit_wise_ai */,
-				62FC59032E4CEBB3009F894B /* fit_wise_aiTests */,
-				62FC590D2E4CEBB3009F894B /* fit_wise_aiUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		62FC58F12E4CEBB3009F894B /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		62FC59022E4CEBB3009F894B /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		62FC590C2E4CEBB3009F894B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -252,34 +135,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		62FC59002E4CEBB3009F894B /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		62FC590A2E4CEBB3009F894B /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXTargetDependency section */
-		62FC59062E4CEBB3009F894B /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 62FC58F22E4CEBB3009F894B /* fit_wise_ai */;
-			targetProxy = 62FC59052E4CEBB3009F894B /* PBXContainerItemProxy */;
-		};
-		62FC59102E4CEBB3009F894B /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 62FC58F22E4CEBB3009F894B /* fit_wise_ai */;
-			targetProxy = 62FC590F2E4CEBB3009F894B /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		62FC59182E4CEBB3009F894B /* Debug */ = {
@@ -287,20 +143,27 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = fit_wise_ai/fit_wise_ai.entitlements;
+				CODE_SIGN_ENTITLEMENTS = fit_wise_ai/fit_wise_aiDebug.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = A9W972FQ56;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = fit_wise_ai/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "健身智慧AI";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "应用需要读取您的健康数据来提供个性化的健身建议";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "应用需要访问您的健康数据以提供更准确的AI健身建议";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = healthkit;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
@@ -308,11 +171,11 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.hexonal.fit-wise-ai";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.flink.fitwiseai";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
@@ -326,19 +189,26 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = fit_wise_ai/fit_wise_ai.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = A9W972FQ56;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = fit_wise_ai/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "健身智慧AI";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "应用需要读取您的健康数据来提供个性化的健身建议";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "应用需要访问您的健康数据以提供更准确的AI健身建议";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = healthkit;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
@@ -346,11 +216,11 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.hexonal.fit-wise-ai";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.flink.fitwiseai";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
@@ -472,92 +342,6 @@
 			};
 			name = Release;
 		};
-		62FC591D2E4CEBB3009F894B /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
-				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.hexonal.fit-wise-aiTests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/fit_wise_ai.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/fit_wise_ai";
-				XROS_DEPLOYMENT_TARGET = 2.5;
-			};
-			name = Debug;
-		};
-		62FC591E2E4CEBB3009F894B /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
-				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.hexonal.fit-wise-aiTests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/fit_wise_ai.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/fit_wise_ai";
-				XROS_DEPLOYMENT_TARGET = 2.5;
-			};
-			name = Release;
-		};
-		62FC59202E4CEBB3009F894B /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
-				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.hexonal.fit-wise-aiUITests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = fit_wise_ai;
-				XROS_DEPLOYMENT_TARGET = 2.5;
-			};
-			name = Debug;
-		};
-		62FC59212E4CEBB3009F894B /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
-				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.hexonal.fit-wise-aiUITests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = fit_wise_ai;
-				XROS_DEPLOYMENT_TARGET = 2.5;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -575,24 +359,6 @@
 			buildConfigurations = (
 				62FC59182E4CEBB3009F894B /* Debug */,
 				62FC59192E4CEBB3009F894B /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		62FC591C2E4CEBB3009F894B /* Build configuration list for PBXNativeTarget "fit_wise_aiTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				62FC591D2E4CEBB3009F894B /* Debug */,
-				62FC591E2E4CEBB3009F894B /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		62FC591F2E4CEBB3009F894B /* Build configuration list for PBXNativeTarget "fit_wise_aiUITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				62FC59202E4CEBB3009F894B /* Debug */,
-				62FC59212E4CEBB3009F894B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

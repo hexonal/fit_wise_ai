@@ -6,27 +6,23 @@
 //
 
 import SwiftUI
-import SwiftData
 
+/**
+ * FitWise AI 应用主入口
+ * 
+ * 这是应用的启动点，负责：
+ * 1. 定义应用的根场景
+ * 2. 设置主窗口组
+ * 3. 初始化应用的根视图
+ * 
+ * FitWise AI 是一个智能健身助手应用，通过分析用户的健康数据
+ * 提供个性化的运动、营养和休息建议。
+ */
 @main
-struct fit_wise_aiApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-
+struct FitWiseAIApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(sharedModelContainer)
     }
 }

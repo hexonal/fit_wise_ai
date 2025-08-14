@@ -6,61 +6,36 @@
 //
 
 import SwiftUI
-import SwiftData
 
+/**
+ * 应用程序的主视图
+ * 
+ * 这是应用的根视图，负责管理主要的导航结构。
+ * 使用 TabView 组件提供底部标签导航，包含两个主要模块：
+ * - 首页：显示健康数据概览和 AI 建议
+ * - 设置：应用配置和用户偏好设置
+ */
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
-
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
+        TabView {
+            // 首页标签 - 健康数据展示和 AI 建议
+            HomeView()
+                .tabItem {
+                    Image(systemName: "house.fill")
+                    Text("首页")
                 }
-                .onDelete(perform: deleteItems)
-            }
-#if os(macOS)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-#endif
-            .toolbar {
-#if os(iOS)
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
+            
+            // 设置标签 - 应用配置界面
+            SettingsView()
+                .tabItem {
+                    Image(systemName: "gear")
+                    Text("设置")
                 }
-#endif
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
         }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
-        }
+        .accentColor(.blue) // 设置标签栏的主题色为蓝色
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
