@@ -25,6 +25,10 @@ class HealthDataViewModel: ObservableObject {
     @Published var healthKitService = HealthKitService()
     /// AI 建议服务实例
     @Published var aiService = AIService()
+    /// 数据持久化服务实例
+    @Published var persistenceService = DataPersistenceService()
+    /// 网络服务实例
+    @Published var networkService = NetworkService()
     /// 数据加载状态标识
     @Published var isLoading = false
     /// 权限拒绝提示框显示状态
@@ -67,24 +71,52 @@ class HealthDataViewModel: ObservableObject {
      * 刷新健康数据和 AI 建议
      * 
      * 主要的数据更新方法，执行以下步骤：
-     * 1. 检查授权状态，未授权时请求权限
+     * 1. 强制检查和请求权限
      * 2. 设置加载状态为 true
-     * 3. 获取今日健康数据
+     * 3. 获取今日健康数据和7天历史数据
      * 4. 基于健康数据生成 AI 建议
      * 5. 重置加载状态为 false
      */
     func refreshHealthData() async {
-        guard healthKitService.isAuthorized else {
-            await requestHealthKitPermission()
+        print("🟦 HealthDataViewModel: refreshHealthData 开始")
+        
+        // 始终先请求权限，确保授权状态是最新的
+        print("🟦 HealthDataViewModel: 强制检查权限状态")
+        await healthKitService.requestAuthorization()
+        
+        // 再次检查授权状态
+        if !healthKitService.isAuthorized {
+            print("🟠 HealthDataViewModel: 权限请求后仍未授权")
+            showingPermissionAlert = true
             return
         }
         
+        print("🟦 HealthDataViewModel: 已授权，开始加载数据")
         isLoading = true
         
-        await healthKitService.fetchTodayHealthData()
+        // 并发获取今日数据和历史数据
+        print("🟦 HealthDataViewModel: 并发获取健康数据")
+        async let todayData = healthKitService.fetchTodayHealthData()
+        async let weeklyData = healthKitService.fetchWeeklyHealthData()
+        
+        // 等待所有数据获取完成
+        await todayData
+        await weeklyData
+        
+        // 保存健康数据到历史记录
+        print("🟦 HealthDataViewModel: 保存健康数据")
+        persistenceService.saveHealthData(healthKitService.healthData)
+        
+        // 生成AI建议（使用最新的健康数据）
+        print("🟦 HealthDataViewModel: 生成AI建议")
         await aiService.generateAdvice(from: healthKitService.healthData)
         
+        // 保存AI建议到历史记录
+        print("🟦 HealthDataViewModel: 保存AI建议")
+        persistenceService.saveAIAdvice(aiService.advice)
+        
         isLoading = false
+        print("🟦 HealthDataViewModel: refreshHealthData 完成，今日步数:\(healthKitService.healthData.steps)")
     }
     
     /**

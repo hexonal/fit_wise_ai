@@ -87,13 +87,13 @@ enum AdviceCategory: String, CaseIterable, Codable {
     var color: String {
         switch self {
         case .exercise:
-            return "blue"            // 蓝色主题
+            return "appBlue"            // 蓝色主题
         case .rest:
-            return "purple"          // 紫色主题
+            return "appPurple"          // 紫色主题
         case .nutrition:
-            return "green"           // 绿色主题
+            return "appGreen"           // 绿色主题
         case .general:
-            return "orange"          // 橙色主题
+            return "appOrange"          // 橙色主题
         }
     }
 }
@@ -104,7 +104,7 @@ enum AdviceCategory: String, CaseIterable, Codable {
  * 定义建议的重要程度级别
  * 用于帮助用户识别哪些建议需要优先关注
  */
-enum AdvicePriority: String, Codable {
+enum AdvicePriority: String, Codable, CaseIterable {
     /// 低优先级建议
     case low = "低"
     /// 中等优先级建议（默认值）

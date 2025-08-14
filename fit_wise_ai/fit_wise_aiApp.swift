@@ -20,9 +20,19 @@ import SwiftUI
  */
 @main
 struct FitWiseAIApp: App {
+    @StateObject private var healthKitService = HealthKitService()
+    
+    init() {
+        print("🚀 FitWiseAIApp: 应用启动")
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(healthKitService)
+                .onAppear {
+                    print("🚀 FitWiseAIApp: ContentView 显示")
+                }
         }
     }
 }

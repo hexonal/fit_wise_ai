@@ -43,9 +43,9 @@
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
     <key>NSHealthShareUsageDescription</key>
-    <string>应用需要读取您的健康数据来提供个性化的健身建议</string>
+    <string>健身智慧AI需要读取您的健康数据，包括步数、心率、运动记录、活动能量等，以便为您提供个性化的AI健身建议和分析报告。您的数据仅用于生成健身建议，我们承诺保护您的隐私安全。</string>
     <key>NSHealthUpdateUsageDescription</key>
-    <string>应用需要访问您的健康数据以提供更准确的AI健身建议</string>
+    <string>健身智慧AI需要记录您的运动数据到健康App，以便完整追踪您的健身进度。数据将安全存储在您的设备健康数据库中。</string>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
         <string>healthkit</string>

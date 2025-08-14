@@ -1,0 +1,16 @@
+=== HealthKit集成诊断报告 ===
+生成时间: 2025年 8月14日 星期四 18时14分58秒 CST
+
+配置检查:
+- Info.plist: ✅ 存在
+- Entitlements: ✅ 存在
+- NSHealthShareUsageDescription: ✅ 已配置
+- NSHealthUpdateUsageDescription: ✅ 已配置
+- HealthKit Entitlement: ✅ 已配置
+
+建议操作:
+1. 在真机上测试应用
+2. 在健康App中检查权限授予状态
+3. 确保Apple Watch数据已同步
+4. 如果问题持续，尝试删除并重新安装应用
+

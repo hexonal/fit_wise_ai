@@ -8,7 +8,8 @@
 import Foundation
 import HealthKit
 
-struct HealthData {
+struct HealthData: Identifiable {
+    let id = UUID()
     let date: Date
     let steps: Int
     let heartRate: Double?

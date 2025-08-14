@@ -11,66 +11,212 @@ import SwiftUI
  * 应用设置视图
  * 
  * 提供用户配置应用行为的界面，包括：
- * 1. 通知设置管理
- * 2. OpenAI API 密钥配置
- * 3. 健康应用快捷访问
- * 4. 应用版本信息显示
+ * 1. HealthKit权限管理
+ * 2. 数据刷新频率设置
+ * 3. AI建议偏好设置
+ * 4. OpenAI API密钥配置
+ * 5. 数据管理功能
  */
 struct SettingsView: View {
-    /// 推送通知开关状态
-    @State private var notificationsEnabled = true
-    /// API 密钥输入临时存储
-    @State private var apiKeyInput = ""
-    /// API 密钥配置界面显示状态
+    @StateObject private var viewModel = HealthDataViewModel()
+    @EnvironmentObject var healthKitService: HealthKitService
+    
+    // 持久化存储
+    @AppStorage("openai_api_key") private var apiKey = ""
+    @AppStorage("auto_refresh_enabled") private var autoRefreshEnabled = true
+    @AppStorage("refresh_interval") private var refreshInterval = 6.0 // 小时
+    @AppStorage("advice_categories") private var adviceCategories = "exercise,nutrition,rest"
+    @AppStorage("notification_enabled") private var notificationEnabled = false
+    
+    // 状态管理
     @State private var showingAPIKeySheet = false
-    /// 持久化存储的 OpenAI API 密钥
-    @AppStorage("openai_api_key") private var storedAPIKey: String = ""
+    @State private var showingClearDataAlert = false
+    @State private var showingAboutSheet = false
+    @State private var showingAdviceHistory = false
     
     var body: some View {
         NavigationStack {
             Form {
-                Section("应用设置") {
+                // HealthKit权限管理
+                Section("健康数据") {
                     HStack {
-                        Image(systemName: "bell")
-                            .foregroundColor(.blue)
+                        Image(systemName: "heart.text.square")
+                            .foregroundColor(.red)
                             .frame(width: 24)
-                        
-                        Toggle("推送通知", isOn: $notificationsEnabled)
+                        Text("HealthKit权限")
+                        Spacer()
+                        Text(healthKitService.isAuthorized ? "已授权" : "未授权")
+                            .foregroundColor(healthKitService.isAuthorized ? .green : .orange)
+                            .font(.caption)
+                    }
+                    .onTapGesture {
+                        if !healthKitService.isAuthorized {
+                            Task {
+                                await healthKitService.requestAuthorization()
+                            }
+                        }
                     }
                     
-                    HStack {
-                        Image(systemName: "key")
-                            .foregroundColor(.orange)
-                            .frame(width: 24)
-                        
-                        Button(action: {
-                            apiKeyInput = storedAPIKey
-                            showingAPIKeySheet = true
-                        }) {
-                            HStack {
-                                Text("AI API密钥")
-                                    .foregroundColor(.primary)
-                                Spacer()
-                                Text(storedAPIKey.isEmpty ? "未设置" : "已设置")
-                                    .foregroundColor(.secondary)
-                                    .font(.caption)
+                    Toggle(isOn: $autoRefreshEnabled) {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                                .foregroundColor(.blue)
+                                .frame(width: 24)
+                            Text("自动刷新数据")
+                        }
+                    }
+                    
+                    if autoRefreshEnabled {
+                        HStack {
+                            Image(systemName: "clock")
+                                .foregroundColor(.orange)
+                                .frame(width: 24)
+                            Text("刷新间隔")
+                            Spacer()
+                            Picker("", selection: $refreshInterval) {
+                                Text("3小时").tag(3.0)
+                                Text("6小时").tag(6.0)
+                                Text("12小时").tag(12.0)
+                                Text("24小时").tag(24.0)
                             }
+                            .pickerStyle(.menu)
                         }
                     }
                 }
                 
-                Section("健康数据") {
+                // AI服务配置
+                Section(header: Text("AI服务"), footer: Text("FitWise AI使用OpenAI技术提供智能健康建议")) {
+                    HStack {
+                        Image(systemName: "key.fill")
+                            .foregroundColor(.orange)
+                            .frame(width: 24)
+                        Button(action: { showingAPIKeySheet = true }) {
+                            HStack {
+                                Text("OpenAI API密钥")
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                Text(apiKey.isEmpty ? "未配置" : "已配置")
+                                    .foregroundColor(apiKey.isEmpty ? .red : .green)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "sparkles")
+                                .foregroundColor(.purple)
+                                .frame(width: 24)
+                            Text("建议类型偏好")
+                        }
+                        
+                        HStack(spacing: 8) {
+                            ForEach(["运动", "营养", "休息"], id: \.self) { category in
+                                let isSelected = adviceCategories.contains(categoryKey(for: category))
+                                Text(category)
+                                    .font(.caption)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(isSelected ? Color.blue : Color.gray.opacity(0.2))
+                                    .foregroundColor(isSelected ? .white : .primary)
+                                    .cornerRadius(15)
+                                    .onTapGesture {
+                                        toggleCategory(category)
+                                    }
+                            }
+                        }
+                        .padding(.leading, 32)
+                    }
+                    
+                    // 网络状态
+                    HStack {
+                        Image(systemName: "wifi")
+                            .foregroundColor(viewModel.networkService.isConnected ? .green : .red)
+                            .frame(width: 24)
+                        
+                        VStack(alignment: .leading) {
+                            Text("网络状态")
+                                .foregroundColor(.primary)
+                            Text(viewModel.networkService.isConnected ? 
+                                 "已连接 (\(viewModel.networkService.connectionType.description))" : 
+                                 "未连接")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        if viewModel.networkService.isConnected {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        } else {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
+                
+                // 通知设置
+                Section("通知") {
+                    Toggle(isOn: $notificationEnabled) {
+                        HStack {
+                            Image(systemName: "bell")
+                                .foregroundColor(.blue)
+                                .frame(width: 24)
+                            Text("健康建议推送")
+                        }
+                    }
+                    
+                    if notificationEnabled {
+                        HStack {
+                            Image(systemName: "alarm")
+                                .foregroundColor(.orange)
+                                .frame(width: 24)
+                            Text("推送时间")
+                            Spacer()
+                            Text("每日 9:00")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                        }
+                    }
+                }
+                
+                // 数据管理
+                Section("数据管理") {
+                    Button(action: { showingAdviceHistory = true }) {
+                        HStack {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .foregroundColor(.blue)
+                                .frame(width: 24)
+                            Text("建议历史")
+                            Spacer()
+                            Text("\(viewModel.persistenceService.adviceHistory.count)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
                     Button(action: openHealthApp) {
                         HStack {
                             Image(systemName: "heart")
                                 .foregroundColor(.red)
                                 .frame(width: 24)
                             Text("打开健康应用")
-                                .foregroundColor(.primary)
+                        }
+                    }
+                    
+                    Button(action: { showingClearDataAlert = true }) {
+                        HStack {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red)
+                                .frame(width: 24)
+                            Text("清除本地缓存")
+                                .foregroundColor(.red)
                         }
                     }
                 }
                 
+                // 关于
                 Section("关于") {
                     HStack {
                         Image(systemName: "info.circle")
@@ -81,80 +227,129 @@ struct SettingsView: View {
                         Text("1.0.0")
                             .foregroundColor(.secondary)
                     }
+                    .onTapGesture {
+                        showingAboutSheet = true
+                    }
+                    
+                    Link(destination: URL(string: "https://github.com/yourapp/privacy")!) {
+                        HStack {
+                            Image(systemName: "lock.shield")
+                                .foregroundColor(.green)
+                                .frame(width: 24)
+                            Text("隐私政策")
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    Link(destination: URL(string: "https://github.com/yourapp/terms")!) {
+                        HStack {
+                            Image(systemName: "doc.text")
+                                .foregroundColor(.orange)
+                                .frame(width: 24)
+                            Text("使用条款")
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
             .navigationTitle("设置")
             .sheet(isPresented: $showingAPIKeySheet) {
-                APIKeyConfigView(apiKey: $apiKeyInput, onSave: saveAPIKey)
+                APIKeyConfigView(apiKey: $apiKey)
+            }
+            .sheet(isPresented: $showingAboutSheet) {
+                AboutView()
+            }
+            .sheet(isPresented: $showingAdviceHistory) {
+                AdviceHistoryView()
+            }
+            .alert("清除缓存", isPresented: $showingClearDataAlert) {
+                Button("取消", role: .cancel) { }
+                Button("清除", role: .destructive) {
+                    clearLocalCache()
+                }
+            } message: {
+                Text("确定要清除所有本地缓存数据吗？这不会影响您的健康数据。")
             }
         }
     }
     
-    /**
-     * 打开系统健康应用
-     * 
-     * 使用自定义 URL Scheme 启动 iOS 健康应用
-     * 方便用户直接访问健康数据管理界面
-     */
+    private func categoryKey(for category: String) -> String {
+        switch category {
+        case "运动": return "exercise"
+        case "营养": return "nutrition"
+        case "休息": return "rest"
+        default: return ""
+        }
+    }
+    
+    private func toggleCategory(_ category: String) {
+        let key = categoryKey(for: category)
+        var categories = adviceCategories.split(separator: ",").map(String.init)
+        
+        if let index = categories.firstIndex(of: key) {
+            categories.remove(at: index)
+        } else {
+            categories.append(key)
+        }
+        
+        adviceCategories = categories.joined(separator: ",")
+    }
+    
+    private func clearLocalCache() {
+        UserDefaults.standard.removeObject(forKey: "cached_health_data")
+        UserDefaults.standard.removeObject(forKey: "cached_ai_advice")
+    }
+    
     private func openHealthApp() {
         if let healthURL = URL(string: "x-apple-health://") {
             UIApplication.shared.open(healthURL)
         }
     }
-    
-    /**
-     * 保存 API 密钥配置
-     * 
-     * 将用户输入的 API 密钥保存到本地存储
-     * 并关闭配置界面
-     */
-    private func saveAPIKey() {
-        storedAPIKey = apiKeyInput
-        showingAPIKeySheet = false
-    }
 }
 
-/**
- * API 密钥配置视图
- * 
- * 专门用于配置 OpenAI API 密钥的模态视图
- * 提供安全的密钥输入界面和使用说明
- */
+// MARK: - API密钥配置视图
 struct APIKeyConfigView: View {
-    /// 绑定的 API 密钥字符串
     @Binding var apiKey: String
-    /// 保存回调函数
-    let onSave: () -> Void
-    /// 环境变量：用于关闭模态视图
+    @State private var tempKey = ""
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("配置OpenAI API密钥")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                
-                Text("为了获得AI建议功能，需要配置OpenAI的API密钥。您的密钥将安全地存储在本地设备上。")
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.leading)
-                
-                VStack(alignment: .leading, spacing: 8) {
+        NavigationView {
+            Form {
+                Section {
+                    SecureField("输入OpenAI API密钥", text: $tempKey)
+                        .textContentType(.password)
+                } header: {
                     Text("API密钥")
-                        .font(.headline)
-                    
-                    SecureField("请输入您的OpenAI API密钥", text: $apiKey)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                } footer: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("您的API密钥将安全地存储在本地")
+                        Link("获取API密钥", destination: URL(string: "https://platform.openai.com/api-keys")!)
+                            .font(.caption)
+                    }
                 }
                 
-                Text("您可以在OpenAI官网（platform.openai.com）获取API密钥")
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("安全提示", systemImage: "lock.shield")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        
+                        Text("• API密钥仅存储在您的设备上")
+                        Text("• 不会上传到任何服务器")
+                        Text("• 请勿与他人分享您的API密钥")
+                    }
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
-                Spacer()
+                }
             }
-            .padding()
-            .navigationTitle("API配置")
+            .navigationTitle("配置API密钥")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -165,15 +360,128 @@ struct APIKeyConfigView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("保存") {
-                        onSave()
+                        apiKey = tempKey
+                        dismiss()
                     }
-                    .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(tempKey.isEmpty)
+                }
+            }
+        }
+        .onAppear {
+            tempKey = apiKey
+        }
+    }
+}
+
+// MARK: - 关于视图
+struct AboutView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // App图标和名称
+                    VStack(spacing: 16) {
+                        Image(systemName: "heart.text.square.fill")
+                            .font(.system(size: 80))
+                            .foregroundColor(.blue)
+                        
+                        Text("FitWise AI")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                        
+                        Text("智能健康管理助手")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 40)
+                    
+                    // 版本信息
+                    VStack(spacing: 12) {
+                        HStack {
+                            Text("版本")
+                            Spacer()
+                            Text("1.0.0 (Build 1)")
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        HStack {
+                            Text("最低系统要求")
+                            Spacer()
+                            Text("iOS 16.0+")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding()
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(12)
+                    
+                    // 功能介绍
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("主要功能")
+                            .font(.headline)
+                        
+                        FeatureRow(icon: "chart.line.uptrend.xyaxis", title: "7天健康趋势", description: "追踪并可视化您的健康数据")
+                        FeatureRow(icon: "sparkles", title: "AI个性化建议", description: "基于您的数据生成智能建议")
+                        FeatureRow(icon: "heart.text.square", title: "HealthKit集成", description: "无缝同步您的健康数据")
+                    }
+                    .padding()
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(12)
+                    
+                    // 开发者信息
+                    VStack(spacing: 8) {
+                        Text("开发者")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("© 2025 FitWise AI Team")
+                            .font(.footnote)
+                    }
+                    .padding(.bottom, 20)
+                }
+                .padding(.horizontal)
+            }
+            .navigationTitle("关于")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("完成") {
+                        dismiss()
+                    }
                 }
             }
         }
     }
 }
 
+struct FeatureRow: View {
+    let icon: String
+    let title: String
+    let description: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(.blue)
+                .frame(width: 30)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+        }
+    }
+}
+
 #Preview {
     SettingsView()
+        .environmentObject(HealthKitService())
 }

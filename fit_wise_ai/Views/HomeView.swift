@@ -6,39 +6,52 @@
 //
 
 import SwiftUI
+import Charts
 
 /**
  * 应用首页视图
  * 
  * 首页是用户的主要交互界面，负责：
  * 1. 健康数据授权管理
- * 2. 健康统计数据展示
- * 3. AI 个性化建议展示
- * 4. 下拉刷新功能
+ * 2. 7天健康数据趋势展示
+ * 3. 数据可视化图表
+ * 4. 关键指标汇总
+ * 5. 下拉刷新功能
  * 
  * 视图会根据 HealthKit 授权状态显示不同内容：
  * - 未授权：显示权限请求界面
- * - 已授权：显示健康数据和 AI 建议
+ * - 已授权：显示7天健康数据和趋势图表
  */
 struct HomeView: View {
     /// 健康数据视图模型，管理数据状态和业务逻辑
     @StateObject private var viewModel = HealthDataViewModel()
+    @EnvironmentObject var healthKitService: HealthKitService
+    @State private var selectedTab = 0
     
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     // 根据授权状态显示不同内容
-                    if !viewModel.isAuthorized {
+                    if !healthKitService.isAuthorized {
                         // 显示权限请求视图
-                        PermissionRequestView(viewModel: viewModel)
+                        PermissionRequestView(viewModel: viewModel, healthKitService: healthKitService)
+                            .onAppear {
+                                print("🟣 HomeView: PermissionRequestView 显示，当前授权状态: \(healthKitService.isAuthorized)")
+                            }
                     } else {
-                        // 显示健康数据和 AI 建议
+                        // 显示7天健康数据和趋势
                         VStack(spacing: 20) {
-                            // 健康统计数据展示
+                            // 今日健康统计数据展示
                             HealthStatsView(healthData: viewModel.healthData)
-                            // AI 智能建议展示
-                            AIAdviceView(advice: viewModel.aiAdvice, isLoading: viewModel.aiService.isLoading)
+                            
+                            // 7天数据趋势图表
+                            if !healthKitService.weeklyHealthData.isEmpty {
+                                WeeklyChartsView(weeklyData: healthKitService.weeklyHealthData, selectedTab: $selectedTab)
+                            }
+                            
+                            // 数据详情列表
+                            WeeklyDataListView(weeklyData: healthKitService.weeklyHealthData)
                         }
                     }
                 }
@@ -47,12 +60,16 @@ struct HomeView: View {
             .navigationTitle("健康概览")
             // 下拉刷新功能
             .refreshable {
-                await viewModel.refreshHealthData()
+                if healthKitService.isAuthorized {
+                    await viewModel.refreshHealthData()
+                    await healthKitService.fetchWeeklyHealthData()
+                }
             }
             // 视图加载时自动刷新数据
             .task {
-                if viewModel.isAuthorized {
+                if healthKitService.isAuthorized {
                     await viewModel.refreshHealthData()
+                    await healthKitService.fetchWeeklyHealthData()
                 }
             }
             // 权限被拒绝时的提示对话框
@@ -80,6 +97,10 @@ struct HomeView: View {
 struct PermissionRequestView: View {
     /// 健康数据视图模型的引用
     let viewModel: HealthDataViewModel
+    let healthKitService: HealthKitService
+    @State private var isRequesting = false
+    @State private var showPermissionDeniedAlert = false
+    @State private var hasAttemptedAuth = false
     
     var body: some View {
         VStack(spacing: 20) {
@@ -101,118 +122,344 @@ struct PermissionRequestView: View {
             
             // 授权按钮
             Button(action: {
+                print("🔵 PermissionRequestView: 授权按钮被点击, isRequesting: \(isRequesting)")
+                guard !isRequesting else {
+                    print("🟠 PermissionRequestView: 正在请求中，忽略重复点击")
+                    return
+                }
+                
+                isRequesting = true
+                print("🔵 PermissionRequestView: 设置 isRequesting = true")
+                
                 Task {
-                    await viewModel.requestHealthKitPermission()
+                    print("🔵 PermissionRequestView: 开始请求HealthKit授权")
+                    await healthKitService.requestAuthorization()
+                    print("🔵 PermissionRequestView: 授权请求完成，授权状态: \(healthKitService.isAuthorized)")
+                    
+                    hasAttemptedAuth = true
+                    
+                    if healthKitService.isAuthorized {
+                        print("🔵 PermissionRequestView: 已授权，开始刷新健康数据")
+                        await viewModel.refreshHealthData()
+                        print("🔵 PermissionRequestView: 健康数据刷新完成")
+                    } else {
+                        print("🔴 PermissionRequestView: 未授权，显示权限被拒绝提示")
+                        showPermissionDeniedAlert = true
+                    }
+                    
+                    isRequesting = false
+                    print("🔵 PermissionRequestView: 设置 isRequesting = false")
                 }
             }) {
-                Text("授权访问健康数据")
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
+                if isRequesting {
+                    HStack {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
+                        Text("正在请求授权...")
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                    }
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.blue)
+                    .background(Color.gray)
                     .cornerRadius(12)
+                } else {
+                    Text("授权访问健康数据")
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                }
             }
             .padding(.horizontal)
+            .disabled(isRequesting)
+            
+            // 如果已经尝试过授权但失败，显示多种解决方案
+            if hasAttemptedAuth && !healthKitService.isAuthorized {
+                VStack(spacing: 12) {
+                    // 刷新授权状态
+                    Button(action: {
+                        guard !isRequesting else { return }
+                        isRequesting = true
+                        
+                        Task {
+                            print("🔵 PermissionRequestView: 刷新授权状态")
+                            
+                            // 使用新的刷新方法
+                            await healthKitService.refreshAuthorizationStatus()
+                            
+                            // 如果已授权，刷新数据
+                            if healthKitService.isAuthorized {
+                                print("🟢 PermissionRequestView: 检测到已授权，开始刷新数据")
+                                await viewModel.refreshHealthData()
+                            } else {
+                                print("🟡 PermissionRequestView: 仍未授权，请在设置中手动开启权限")
+                                showPermissionDeniedAlert = true
+                            }
+                            
+                            isRequesting = false
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                            Text("刷新授权状态")
+                        }
+                        .fontWeight(.medium)
+                        .foregroundColor(.green)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 16)
+                        .background(Color.green.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    .disabled(isRequesting)
+                    
+                    // 前往设置
+                    Button(action: {
+                        if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(settingsUrl)
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "gear")
+                            Text("前往iPhone设置")
+                        }
+                        .fontWeight(.medium)
+                        .foregroundColor(.blue)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 16)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    
+                    // 帮助文本
+                    Text("如果权限被拒绝，请尝试：\n1. 点击\"前往iPhone设置\"手动开启权限\n2. 或在健康App中找到本应用并授权\n3. 确保健康App中有数据记录")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 8)
+                    
+                    // 添加前往健康App的按钮
+                    Button(action: {
+                        if let healthUrl = URL(string: "x-apple-health://") {
+                            UIApplication.shared.open(healthUrl)
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "heart.text.square.fill")
+                                .foregroundColor(.red)
+                            Text("打开健康App")
+                        }
+                        .fontWeight(.medium)
+                        .foregroundColor(.red)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 16)
+                        .background(Color.red.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    .padding(.top, 8)
+                }
+            }
         }
         .padding()
         .background(Color.gray.opacity(0.1))
         .cornerRadius(16)
-    }
-}
-
-/**
- * AI 建议展示视图
- * 
- * 负责展示基于用户健康数据生成的 AI 个性化建议
- * 支持加载状态、空状态和内容展示三种状态
- */
-struct AIAdviceView: View {
-    /// AI 建议数据数组
-    let advice: [AIAdvice]
-    /// 是否正在加载状态
-    let isLoading: Bool
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // 标题
-            Text("AI 智能建议")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            // 根据状态显示不同内容
-            if isLoading {
-                // 加载状态
-                HStack {
-                    ProgressView()
-                    Text("正在生成个性化建议...")
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding()
-            } else if advice.isEmpty {
-                // 空状态
-                Text("暂无建议数据")
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding()
-            } else {
-                // 建议列表
-                LazyVStack(spacing: 12) {
-                    ForEach(advice) { adviceItem in
-                        AIAdviceCard(advice: adviceItem)
-                    }
+        .alert("权限被拒绝", isPresented: $showPermissionDeniedAlert) {
+            Button("前往设置") {
+                if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsUrl)
                 }
             }
+            Button("稍后再说", role: .cancel) { }
+        } message: {
+            Text("健康数据权限已被拒绝。请在iPhone设置 > 隐私与安全性 > 健康 > 健身智慧AI中开启相关权限。")
         }
     }
 }
 
 /**
- * AI 建议卡片视图
+ * 7天数据趋势图表视图
  * 
- * 展示单条 AI 建议的卡片组件
- * 包含分类图标、标题和详细内容
+ * 使用 Swift Charts 展示7天健康数据趋势
+ * 支持步数、心率、活动能量等多种数据类型切换
  */
-struct AIAdviceCard: View {
-    /// 建议数据
-    let advice: AIAdvice
+struct WeeklyChartsView: View {
+    let weeklyData: [HealthData]
+    @Binding var selectedTab: Int
     
     var body: some View {
-        HStack(spacing: 12) {
-            // 分类图标
-            Image(systemName: advice.category.icon)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("7天趋势")
                 .font(.title2)
-                .foregroundColor(Color(advice.category.color))
-                .frame(width: 32, height: 32)
+                .fontWeight(.semibold)
             
-            // 建议内容
-            VStack(alignment: .leading, spacing: 4) {
-                // 建议标题
-                Text(advice.title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                
-                // 建议详细内容
-                Text(advice.content)
-                    .font(.body)
-                    .foregroundColor(.primary)
-                    .multilineTextAlignment(.leading)
+            // 数据类型选择器
+            Picker("", selection: $selectedTab) {
+                Text("步数").tag(0)
+                Text("消耗").tag(1)
+                Text("运动").tag(2)
             }
+            .pickerStyle(.segmented)
             
-            Spacer()
+            // 图表
+            Chart(weeklyData) { data in
+                switch selectedTab {
+                case 0: // 步数
+                    LineMark(
+                        x: .value("日期", data.date, unit: .day),
+                        y: .value("步数", data.steps)
+                    )
+                    .foregroundStyle(.blue)
+                    .symbol(Circle())
+                    
+                    AreaMark(
+                        x: .value("日期", data.date, unit: .day),
+                        y: .value("步数", data.steps)
+                    )
+                    .foregroundStyle(.blue.opacity(0.1))
+                    
+                case 1: // 活动消耗
+                    BarMark(
+                        x: .value("日期", data.date, unit: .day),
+                        y: .value("卡路里", data.activeEnergyBurned)
+                    )
+                    .foregroundStyle(.orange)
+                    
+                case 2: // 运动时长
+                    LineMark(
+                        x: .value("日期", data.date, unit: .day),
+                        y: .value("分钟", data.workoutTime / 60)
+                    )
+                    .foregroundStyle(.green)
+                    .symbol(Circle())
+                    
+                default:
+                    // 默认显示步数图表
+                    LineMark(
+                        x: .value("日期", data.date, unit: .day),
+                        y: .value("步数", data.steps)
+                    )
+                    .foregroundStyle(.blue)
+                    .symbol(Circle())
+                }
+            }
+            .frame(height: 200)
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day)) { _ in
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                }
+            }
+            .chartYAxis {
+                AxisMarks { _ in
+                    AxisGridLine()
+                    AxisValueLabel()
+                }
+            }
         }
         .padding()
         .background(Color.gray.opacity(0.05))
         .cornerRadius(12)
-        .overlay(
-            // 边框颜色与分类颜色一致
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(advice.category.color).opacity(0.3), lineWidth: 1)
-        )
     }
 }
 
+/**
+ * 7天数据详情列表视图
+ * 
+ * 展示7天健康数据的详细列表
+ * 包含每日的步数、消耗、运动时长等指标
+ */
+struct WeeklyDataListView: View {
+    let weeklyData: [HealthData]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("数据详情")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            if weeklyData.isEmpty {
+                Text("暂无历史数据")
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+            } else {
+                ForEach(weeklyData.sorted { $0.date > $1.date }) { data in
+                    WeeklyDataRow(data: data)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 单日数据行视图
+ */
+struct WeeklyDataRow: View {
+    let data: HealthData
+    
+    private var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM月dd日"
+        return formatter
+    }
+    
+    private var isToday: Bool {
+        Calendar.current.isDateInToday(data.date)
+    }
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(dateFormatter.string(from: data.date))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    
+                    if isToday {
+                        Text("今天")
+                            .font(.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(4)
+                    }
+                }
+                
+                HStack(spacing: 16) {
+                    Label("\(data.steps)", systemImage: "figure.walk")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Label(String(format: "%.0f kcal", data.activeEnergyBurned), systemImage: "flame.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Label(String(format: "%.0f min", data.workoutTime / 60), systemImage: "timer")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            // 达标指示器
+            if data.steps >= 10000 {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+            }
+        }
+        .padding()
+        .background(isToday ? Color.blue.opacity(0.05) : Color.gray.opacity(0.05))
+        .cornerRadius(8)
+    }
+}
+
+
 #Preview {
     HomeView()
+        .environmentObject(HealthKitService())
 }
