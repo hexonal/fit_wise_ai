@@ -17,13 +17,26 @@ struct HealthStatsView: View {
                 .fontWeight(.semibold)
             
             VStack(spacing: 12) {
-                StatRow(
-                    icon: "heart.fill",
-                    title: "心率",
-                    value: healthData.formattedHeartRate,
-                    unit: "bpm",
-                    color: .red
-                )
+                // 心率：显示具体数值和健康状态（如"72 - 正常"）
+                // 相比之前分开显示数值和区间，现在合并显示更直观
+                if let heartRate = healthData.heartRate {
+                    let zone = getHeartRateZone(heartRate)
+                    StatRow(
+                        icon: "heart.fill",
+                        title: "心率",
+                        value: "\(Int(heartRate)) - \(zone.name)", // 格式：数值 - 状态描述
+                        unit: "bpm",
+                        color: zone.color // 根据心率状态显示不同颜色
+                    )
+                } else {
+                    StatRow(
+                        icon: "heart.fill",
+                        title: "心率",
+                        value: "暂无数据",
+                        unit: "",
+                        color: .gray
+                    )
+                }
                 
                 StatRow(
                     icon: "figure.walk",
@@ -40,17 +53,6 @@ struct HealthStatsView: View {
                     unit: "",
                     color: .green
                 )
-                
-                if let heartRate = healthData.heartRate {
-                    let zone = getHeartRateZone(heartRate)
-                    StatRow(
-                        icon: "waveform.path.ecg",
-                        title: "心率区间",
-                        value: zone.name,
-                        unit: "",
-                        color: zone.color
-                    )
-                }
             }
         }
     }

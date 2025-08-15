@@ -22,9 +22,11 @@ class DataPersistenceService: ObservableObject {
     private let documentsDirectory: URL
     
     init() {
+        print("🟢 DataPersistence: 初始化数据持久化服务")
         self.documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         setupDataStorage()
         loadRecentData()
+        print("🟢 DataPersistence: 数据持久化服务初始化完成")
     }
     
     /// 健康数据历史记录
@@ -39,7 +41,14 @@ class DataPersistenceService: ObservableObject {
         // 创建数据目录（如果不存在）
         let dataDirectory = documentsDirectory.appendingPathComponent("FitWiseAI")
         if !FileManager.default.fileExists(atPath: dataDirectory.path) {
-            try? FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+            do {
+                try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+                print("🟢 DataPersistence: 创建数据目录成功")
+            } catch {
+                print("🔴 DataPersistence: 创建数据目录失败: \(error)")
+            }
+        } else {
+            print("🟡 DataPersistence: 数据目录已存在")
         }
     }
     
@@ -249,13 +258,21 @@ class DataPersistenceService: ObservableObject {
      * 从磁盘加载健康数据
      */
     private func loadHealthDataFromDisk() {
+        // 检查文件是否存在
+        guard FileManager.default.fileExists(atPath: healthDataURL.path) else {
+            print("🟡 DataPersistence: 健康数据文件不存在，使用空数据（首次运行正常）")
+            healthDataHistory = []
+            return
+        }
+        
         do {
             let data = try Data(contentsOf: healthDataURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             healthDataHistory = try decoder.decode([HealthDataRecord].self, from: data)
+            print("🟢 DataPersistence: 健康数据加载成功，共\(healthDataHistory.count)条记录")
         } catch {
-            print("健康数据加载失败: \(error)")
+            print("🔴 DataPersistence: 健康数据加载失败: \(error)")
             healthDataHistory = []
         }
     }
@@ -278,13 +295,21 @@ class DataPersistenceService: ObservableObject {
      * 从磁盘加载AI建议历史
      */
     private func loadAdviceHistoryFromDisk() {
+        // 检查文件是否存在
+        guard FileManager.default.fileExists(atPath: adviceHistoryURL.path) else {
+            print("🟡 DataPersistence: AI建议历史文件不存在，使用空数据（首次运行正常）")
+            adviceHistory = []
+            return
+        }
+        
         do {
             let data = try Data(contentsOf: adviceHistoryURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             adviceHistory = try decoder.decode([AIAdviceRecord].self, from: data)
+            print("🟢 DataPersistence: AI建议历史加载成功，共\(adviceHistory.count)条记录")
         } catch {
-            print("AI建议历史加载失败: \(error)")
+            print("🔴 DataPersistence: AI建议历史加载失败: \(error)")
             adviceHistory = []
         }
     }
@@ -302,6 +327,7 @@ class DataPersistenceService: ObservableObject {
     private var adviceHistoryURL: URL {
         return documentsDirectory.appendingPathComponent("FitWiseAI/advice_history.json")
     }
+    
 }
 
 // MARK: - 数据模型

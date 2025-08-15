@@ -96,12 +96,8 @@ class HealthDataViewModel: ObservableObject {
         
         // 并发获取今日数据和历史数据
         print("🟦 HealthDataViewModel: 并发获取健康数据")
-        async let todayData = healthKitService.fetchTodayHealthData()
-        async let weeklyData = healthKitService.fetchWeeklyHealthData()
-        
-        // 等待所有数据获取完成
-        await todayData
-        await weeklyData
+        await healthKitService.fetchTodayHealthData()
+        await healthKitService.fetchWeeklyHealthData()
         
         // 保存健康数据到历史记录
         print("🟦 HealthDataViewModel: 保存健康数据")

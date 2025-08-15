@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Charts
+import HealthKit
 
 /**
  * 应用首页视图
@@ -27,64 +28,257 @@ struct HomeView: View {
     @StateObject private var viewModel = HealthDataViewModel()
     @EnvironmentObject var healthKitService: HealthKitService
     @State private var selectedTab = 0
+    /// 是否正在检查权限状态的标识，用于显示加载界面
+    @State private var isCheckingPermissions = true
+    /// 缺失的HealthKit权限列表，用于显示具体需要哪些权限
+    @State private var missingPermissions: [HKObjectType] = []
     
     var body: some View {
         NavigationStack {
-            ScrollView {
+            if isCheckingPermissions {
+                // 权限检查加载界面
                 VStack(spacing: 20) {
-                    // 根据授权状态显示不同内容
-                    if !healthKitService.isAuthorized {
-                        // 显示权限请求视图
-                        PermissionRequestView(viewModel: viewModel, healthKitService: healthKitService)
-                            .onAppear {
-                                print("🟣 HomeView: PermissionRequestView 显示，当前授权状态: \(healthKitService.isAuthorized)")
+                    ProgressView()
+                        .scaleEffect(1.5)
+                    Text("正在检查健康数据权限...")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemBackground))
+            } else {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // 根据权限状态显示不同内容
+                        if !missingPermissions.isEmpty {
+                            // 显示权限请求视图
+                            EnhancedPermissionRequestView(
+                                viewModel: viewModel, 
+                                healthKitService: healthKitService,
+                                missingPermissions: missingPermissions,
+                                onPermissionUpdate: {
+                                    await checkPermissionsAndRefreshData()
+                                }
+                            )
+                        } else if healthKitService.isAuthorized {
+                            // 显示7天健康数据和趋势
+                            VStack(spacing: 20) {
+                                // 今日健康统计数据展示
+                                HealthStatsView(healthData: viewModel.healthData)
+                                
+                                // 7天数据趋势图表
+                                if !healthKitService.weeklyHealthData.isEmpty {
+                                    WeeklyChartsView(weeklyData: healthKitService.weeklyHealthData, selectedTab: $selectedTab)
+                                } else {
+                                    // 没有数据时的提示
+                                    VStack(spacing: 12) {
+                                        Text("暂无历史数据")
+                                            .font(.headline)
+                                            .foregroundColor(.secondary)
+                                        
+                                        #if targetEnvironment(simulator)
+                                        Text("💡 在模拟器中测试时，请到健康App中添加一些示例数据")
+                                            .font(.caption)
+                                            .foregroundColor(.orange)
+                                            .multilineTextAlignment(.center)
+                                            .padding(.horizontal)
+                                        #else
+                                        Text("开始使用Apple Watch或iPhone记录健康数据后，这里将显示您的健康趋势")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                            .multilineTextAlignment(.center)
+                                            .padding(.horizontal)
+                                        #endif
+                                    }
+                                    .padding()
+                                    .background(Color.gray.opacity(0.1))
+                                    .cornerRadius(12)
+                                }
+                                
+                                // 数据详情列表
+                                WeeklyDataListView(weeklyData: healthKitService.weeklyHealthData)
                             }
-                    } else {
-                        // 显示7天健康数据和趋势
-                        VStack(spacing: 20) {
-                            // 今日健康统计数据展示
-                            HealthStatsView(healthData: viewModel.healthData)
-                            
-                            // 7天数据趋势图表
-                            if !healthKitService.weeklyHealthData.isEmpty {
-                                WeeklyChartsView(weeklyData: healthKitService.weeklyHealthData, selectedTab: $selectedTab)
-                            }
-                            
-                            // 数据详情列表
-                            WeeklyDataListView(weeklyData: healthKitService.weeklyHealthData)
+                        } else {
+                            // 权限未授权的备用视图
+                            PermissionRequestView(viewModel: viewModel, healthKitService: healthKitService)
                         }
                     }
+                    .padding()
                 }
-                .padding()
-            }
-            .navigationTitle("健康概览")
-            // 下拉刷新功能
-            .refreshable {
-                if healthKitService.isAuthorized {
-                    await viewModel.refreshHealthData()
-                    await healthKitService.fetchWeeklyHealthData()
+                .navigationTitle("健康概览")
+                // 下拉刷新功能
+                .refreshable {
+                    await checkPermissionsAndRefreshData()
                 }
-            }
-            // 视图加载时自动刷新数据
-            .task {
-                if healthKitService.isAuthorized {
-                    await viewModel.refreshHealthData()
-                    await healthKitService.fetchWeeklyHealthData()
-                }
-            }
-            // 权限被拒绝时的提示对话框
-            .alert("权限被拒绝", isPresented: $viewModel.showingPermissionAlert) {
-                Button("设置") {
-                    // 打开系统设置页面
-                    if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(settingsUrl)
-                    }
-                }
-                Button("取消", role: .cancel) { }
-            } message: {
-                Text("请在设置中允许访问健康数据以获取个性化建议")
             }
         }
+        // 视图首次加载时检查权限
+        .task {
+            await checkPermissionsAndRefreshData()
+        }
+        // 权限被拒绝时的提示对话框
+        .alert("健康数据访问被拒绝", isPresented: $viewModel.showingPermissionAlert) {
+            Button("重新授权") {
+                Task {
+                    await healthKitService.requestAuthorization()
+                    await checkPermissionsAndRefreshData()
+                }
+            }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("需要访问您的健康数据以提供个性化建议。请在系统权限对话框中选择\"允许\"。")
+        }
+    }
+    
+    /// 检查HealthKit权限状态并刷新健康数据
+    /// 
+    /// 此方法执行完整的权限检查流程：
+    /// 1. 检查应用所需的4个核心HealthKit权限（步数、距离、活动能量、心率）
+    /// 2. 如果所有权限都已授权，则刷新今日和历史健康数据
+    /// 3. 更新UI状态以反映权限检查结果
+    private func checkPermissionsAndRefreshData() async {
+        print("🔵 HomeView: 开始权限检查流程")
+        isCheckingPermissions = true
+        
+        // 首先检查当前授权状态
+        await healthKitService.checkCurrentAuthorizationStatus()
+        print("🔵 HomeView: 权限检查完成，isAuthorized: \(healthKitService.isAuthorized)")
+        
+        // 检查应用必需的HealthKit权限，返回缺失的权限类型
+        let missing = healthKitService.checkRequiredPermissions()
+        missingPermissions = missing
+        print("🔵 HomeView: 缺失权限数量: \(missing.count), isAuthorized: \(healthKitService.isAuthorized)")
+        
+        if missing.isEmpty && healthKitService.isAuthorized {
+            // 所有权限都已授权，开始获取健康数据
+            print("🔵 HomeView: 权限完整，开始获取数据")
+            await viewModel.refreshHealthData()
+            await healthKitService.fetchWeeklyHealthData()
+        } else {
+            print("🔵 HomeView: 权限不完整，将显示权限请求界面")
+        }
+        
+        // 权限检查完成，更新UI状态
+        isCheckingPermissions = false
+    }
+}
+
+/**
+ * 增强版权限请求视图
+ * 
+ * 相比基础的权限请求视图，此版本提供了以下增强功能：
+ * 1. 显示具体缺失的权限类型列表（步数、心率等）
+ * 2. 提供权限说明和用户指导
+ * 3. 授权完成后自动触发权限状态刷新
+ * 4. 友好的中文权限名称显示
+ */
+struct EnhancedPermissionRequestView: View {
+    let viewModel: HealthDataViewModel
+    let healthKitService: HealthKitService
+    /// 缺失的HealthKit权限类型数组
+    let missingPermissions: [HKObjectType]
+    /// 权限更新后的回调函数，用于刷新父视图状态
+    let onPermissionUpdate: () async -> Void
+    /// 是否正在请求权限的状态标识
+    @State private var isRequesting = false
+    
+    /// 将HealthKit权限标识符转换为用户友好的中文名称
+    /// - Parameter type: HealthKit权限类型
+    /// - Returns: 对应的中文权限名称
+    private func getPermissionName(for type: HKObjectType) -> String {
+        switch type.identifier {
+        case HKQuantityTypeIdentifier.stepCount.rawValue:
+            return "步数"
+        case HKQuantityTypeIdentifier.distanceWalkingRunning.rawValue:
+            return "步行+跑步距离"
+        case HKQuantityTypeIdentifier.activeEnergyBurned.rawValue:
+            return "活动能量"
+        case HKQuantityTypeIdentifier.heartRate.rawValue:
+            return "心率"
+        default:
+            return type.identifier
+        }
+    }
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            // 权限图标
+            Image(systemName: "heart.fill")
+                .font(.system(size: 60))
+                .foregroundColor(.red)
+            
+            // 标题
+            Text("需要健康数据访问权限")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            // 说明
+            Text("为了为您提供个性化的健身建议，需要获取以下健康数据的访问权限：")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+                .padding(.horizontal)
+            
+            // 缺失权限列表
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(missingPermissions.enumerated()), id: \.offset) { index, permission in
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text(getPermissionName(for: permission))
+                            .fontWeight(.medium)
+                        Spacer()
+                    }
+                }
+            }
+            .padding()
+            .background(Color.orange.opacity(0.1))
+            .cornerRadius(12)
+            
+            // 授权按钮
+            Button(action: {
+                guard !isRequesting else { return }
+                isRequesting = true
+                
+                Task {
+                    await healthKitService.requestAuthorization()
+                    
+                    // 授权完成后，等待一下再检查状态
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 1秒
+                    
+                    // 刷新权限状态并通知父视图
+                    await onPermissionUpdate()
+                    
+                    isRequesting = false
+                }
+            }) {
+                if isRequesting {
+                    HStack {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.8)
+                        Text("正在请求授权...")
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.gray)
+                    .cornerRadius(12)
+                } else {
+                    Text("授权访问健康数据")
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                }
+            }
+            .disabled(isRequesting)
+        }
+        .padding()
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(16)
     }
 }
 
@@ -187,17 +381,11 @@ struct PermissionRequestView: View {
                         
                         Task {
                             print("🔵 PermissionRequestView: 刷新授权状态")
-                            
-                            // 使用新的刷新方法
                             await healthKitService.refreshAuthorizationStatus()
                             
-                            // 如果已授权，刷新数据
                             if healthKitService.isAuthorized {
                                 print("🟢 PermissionRequestView: 检测到已授权，开始刷新数据")
                                 await viewModel.refreshHealthData()
-                            } else {
-                                print("🟡 PermissionRequestView: 仍未授权，请在设置中手动开启权限")
-                                showPermissionDeniedAlert = true
                             }
                             
                             isRequesting = false
@@ -216,50 +404,13 @@ struct PermissionRequestView: View {
                     }
                     .disabled(isRequesting)
                     
-                    // 前往设置
-                    Button(action: {
-                        if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(settingsUrl)
-                        }
-                    }) {
-                        HStack {
-                            Image(systemName: "gear")
-                            Text("前往iPhone设置")
-                        }
-                        .fontWeight(.medium)
-                        .foregroundColor(.blue)
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 16)
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(8)
-                    }
                     
                     // 帮助文本
-                    Text("如果权限被拒绝，请尝试：\n1. 点击\"前往iPhone设置\"手动开启权限\n2. 或在健康App中找到本应用并授权\n3. 确保健康App中有数据记录")
+                    Text("HealthKit读权限说明：\n1. 系统会弹出权限对话框，请选择\"允许\"\n2. 读权限不会显示在iPhone设置中\n3. 如仍有问题，请点击\"刷新授权状态\"")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.top, 8)
-                    
-                    // 添加前往健康App的按钮
-                    Button(action: {
-                        if let healthUrl = URL(string: "x-apple-health://") {
-                            UIApplication.shared.open(healthUrl)
-                        }
-                    }) {
-                        HStack {
-                            Image(systemName: "heart.text.square.fill")
-                                .foregroundColor(.red)
-                            Text("打开健康App")
-                        }
-                        .fontWeight(.medium)
-                        .foregroundColor(.red)
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 16)
-                        .background(Color.red.opacity(0.1))
-                        .cornerRadius(8)
-                    }
-                    .padding(.top, 8)
                 }
             }
         }
@@ -267,14 +418,14 @@ struct PermissionRequestView: View {
         .background(Color.gray.opacity(0.1))
         .cornerRadius(16)
         .alert("权限被拒绝", isPresented: $showPermissionDeniedAlert) {
-            Button("前往设置") {
-                if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(settingsUrl)
+            Button("重新授权") {
+                Task {
+                    await healthKitService.requestAuthorization()
                 }
             }
             Button("稍后再说", role: .cancel) { }
         } message: {
-            Text("健康数据权限已被拒绝。请在iPhone设置 > 隐私与安全性 > 健康 > 健身智慧AI中开启相关权限。")
+            Text("HealthKit健康数据访问权限被拒绝。请在系统权限对话框中选择\"允许\"以获取健康数据。注意：HealthKit读权限不会显示在iPhone设置中。")
         }
     }
 }
@@ -288,6 +439,14 @@ struct PermissionRequestView: View {
 struct WeeklyChartsView: View {
     let weeklyData: [HealthData]
     @Binding var selectedTab: Int
+    
+    /// 中文星期格式器
+    private var chineseWeekdayFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "EEE"
+        return formatter
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -347,9 +506,14 @@ struct WeeklyChartsView: View {
             }
             .frame(height: 200)
             .chartXAxis {
-                AxisMarks(values: .stride(by: .day)) { _ in
+                AxisMarks(values: .stride(by: .day)) { value in
                     AxisGridLine()
-                    AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(chineseWeekdayFormatter.string(from: date))
+                                .font(.caption)
+                        }
+                    }
                 }
             }
             .chartYAxis {
