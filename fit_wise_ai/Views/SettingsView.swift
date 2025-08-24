@@ -23,6 +23,7 @@ struct SettingsView: View {
     
     // 持久化存储
     @AppStorage("openai_api_key") private var apiKey = ""
+    @AppStorage("ai_base_url") private var baseURL = ""
     @AppStorage("auto_refresh_enabled") private var autoRefreshEnabled = true
     @AppStorage("refresh_interval") private var refreshInterval = 6.0 // 小时
     @AppStorage("advice_categories") private var adviceCategories = "exercise,nutrition,rest"
@@ -33,74 +34,143 @@ struct SettingsView: View {
     @State private var showingClearDataAlert = false
     @State private var showingAboutSheet = false
     @State private var showingAdviceHistory = false
+    @State private var showingProviderSheet = false
+    @State private var showingCustomURLSheet = false
+    @State private var selectedProvider = AIProvider.openAI
+    @State private var customBaseURL = ""
     
     var body: some View {
         NavigationStack {
-            Form {
-                // HealthKit权限管理
-                Section("健康数据") {
-                    HStack {
-                        Image(systemName: "heart.text.square")
-                            .foregroundColor(.red)
-                            .frame(width: 24)
-                        Text("HealthKit权限")
-                        Spacer()
-                        Text(healthKitService.isAuthorized ? "已授权" : "未授权")
-                            .foregroundColor(healthKitService.isAuthorized ? .green : .orange)
-                            .font(.caption)
-                    }
-                    .onTapGesture {
-                        if !healthKitService.isAuthorized {
-                            Task {
-                                await healthKitService.requestAuthorization()
-                            }
-                        }
-                    }
-                    
-                    Toggle(isOn: $autoRefreshEnabled) {
-                        HStack {
-                            Image(systemName: "arrow.clockwise")
-                                .foregroundColor(.blue)
-                                .frame(width: 24)
-                            Text("自动刷新数据")
-                        }
-                    }
-                    
-                    if autoRefreshEnabled {
-                        HStack {
-                            Image(systemName: "clock")
-                                .foregroundColor(.orange)
-                                .frame(width: 24)
-                            Text("刷新间隔")
-                            Spacer()
-                            Picker("", selection: $refreshInterval) {
-                                Text("3小时").tag(3.0)
-                                Text("6小时").tag(6.0)
-                                Text("12小时").tag(12.0)
-                                Text("24小时").tag(24.0)
-                            }
-                            .pickerStyle(.menu)
-                        }
-                    }
-                }
+            ZStack {
+                // 透明背景以显示渐变
+                Color.clear
                 
-                // AI服务配置
-                Section(header: Text("AI服务"), footer: Text("FitWise AI使用OpenAI技术提供智能健康建议")) {
-                    HStack {
-                        Image(systemName: "key.fill")
-                            .foregroundColor(.orange)
-                            .frame(width: 24)
-                        Button(action: { showingAPIKeySheet = true }) {
-                            HStack {
-                                Text("OpenAI API密钥")
-                                    .foregroundColor(.primary)
-                                Spacer()
-                                Text(apiKey.isEmpty ? "未配置" : "已配置")
-                                    .foregroundColor(apiKey.isEmpty ? .red : .green)
-                                    .font(.caption)
+                ScrollView {
+                    VStack(spacing: AISpacing.lg) {
+                        // 现代化HealthKit权限管理
+                        ModernSettingsSection(title: "健康数据", icon: "heart.fill", color: .red) {
+                            ModernSettingsRow(
+                                icon: "heart.text.square",
+                                iconColor: .red,
+                                title: "HealthKit权限",
+                                value: healthKitService.isAuthorized ? "已授权" : "未授权",
+                                valueColor: healthKitService.isAuthorized ? AITheme.success : AITheme.warning,
+                                showArrow: !healthKitService.isAuthorized
+                            ) {
+                                if !healthKitService.isAuthorized {
+                                    Task {
+                                        await healthKitService.requestAuthorization()
+                                    }
+                                }
+                            }
+                            
+                            Divider()
+                                .padding(.vertical, AISpacing.xs)
+                            
+                            ModernSettingsToggle(
+                                icon: "arrow.clockwise",
+                                iconColor: .blue,
+                                title: "自动刷新数据",
+                                subtitle: "定期从HealthKit获取最新数据",
+                                isOn: $autoRefreshEnabled
+                            )
+                            
+                            if autoRefreshEnabled {
+                                Divider()
+                                    .padding(.vertical, AISpacing.xs)
+                                
+                                HStack(spacing: AISpacing.md) {
+                                    Image(systemName: "clock")
+                                        .font(.title3)
+                                        .foregroundColor(.orange)
+                                        .frame(width: 24)
+                                    
+                                    Text("刷新间隔")
+                                        .font(AITypography.body)
+                                        .foregroundColor(AITheme.textPrimary)
+                                    
+                                    Spacer()
+                                    
+                                    Picker("", selection: $refreshInterval) {
+                                        Text("3小时").tag(3.0)
+                                        Text("6小时").tag(6.0)
+                                        Text("12小时").tag(12.0)
+                                        Text("24小时").tag(24.0)
+                                    }
+                                    .pickerStyle(.menu)
+                                    .tint(AITheme.accent)
+                                }
+                                .padding(.vertical, AISpacing.xs)
                             }
                         }
-                    }
+                        
+                        // 现代化AI服务配置
+                        ModernSettingsSection(
+                            title: "AI服务", 
+                            icon: "sparkles", 
+                            color: AITheme.accent,
+                            footer: "FitWise AI支持多种AI服务提供商，包括OpenAI、Claude、DeepSeek等"
+                        ) {
+                            // AI服务提供商选择
+                            ModernSettingsRow(
+                                icon: "globe",
+                                iconColor: .purple,
+                                title: "AI服务提供商",
+                                value: currentProviderName
+                            ) {
+                                showingProviderSheet = true
+                            }
+                            
+                            Divider()
+                                .padding(.vertical, AISpacing.xs)
+                            
+                            // API密钥配置
+                            ModernSettingsRow(
+                                icon: "key.fill",
+                                iconColor: .orange,
+                                title: "API密钥",
+                                value: apiKey.isEmpty ? "未配置" : "已配置",
+                                valueColor: apiKey.isEmpty ? AITheme.error : AITheme.success
+                            ) {
+                                showingAPIKeySheet = true
+                            }
+                            
+                            // 显示当前baseURL（如果是自定义的话）
+                            if !baseURL.isEmpty && currentProviderName == "自定义" {
+                                Divider()
+                                    .padding(.vertical, AISpacing.xs)
+                                
+                                HStack(spacing: AISpacing.md) {
+                                    Image(systemName: "link")
+                                        .font(.title3)
+                                        .foregroundColor(.blue)
+                                        .frame(width: 24)
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("服务地址")
+                                            .font(AITypography.body)
+                                            .foregroundColor(AITheme.textPrimary)
+                                        Text(baseURL)
+                                            .font(AITypography.caption)
+                                            .foregroundColor(AITheme.textSecondary)
+                                            .lineLimit(2)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Button("修改") {
+                                        customBaseURL = baseURL
+                                        showingCustomURLSheet = true
+                                    }
+                                    .font(AITypography.caption)
+                                    .foregroundColor(AITheme.accent)
+                                    .padding(.horizontal, AISpacing.sm)
+                                    .padding(.vertical, 4)
+                                    .background(AITheme.accent.opacity(0.1))
+                                    .cornerRadius(AIRadius.sm)
+                                }
+                                .padding(.vertical, AISpacing.xs)
+                            }
                     
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
@@ -154,10 +224,10 @@ struct SettingsView: View {
                                 .foregroundColor(.red)
                         }
                     }
-                }
-                
-                // 通知设置
-                Section("通知") {
+                        }
+                        
+                        // 现代化通知设置
+                        ModernSettingsSection(title: "通知", icon: "bell.fill", color: .blue) {
                     Toggle(isOn: $notificationEnabled) {
                         HStack {
                             Image(systemName: "bell")
@@ -179,10 +249,10 @@ struct SettingsView: View {
                                 .font(.caption)
                         }
                     }
-                }
-                
-                // 数据管理
-                Section("数据管理") {
+                        }
+                        
+                        // 现代化数据管理
+                        ModernSettingsSection(title: "数据管理", icon: "externaldrive.fill", color: .orange) {
                     Button(action: { showingAdviceHistory = true }) {
                         HStack {
                             Image(systemName: "clock.arrow.circlepath")
@@ -214,10 +284,10 @@ struct SettingsView: View {
                                 .foregroundColor(.red)
                         }
                     }
-                }
-                
-                // 关于
-                Section("关于") {
+                        }
+                        
+                        // 现代化关于
+                        ModernSettingsSection(title: "关于", icon: "info.circle.fill", color: .green) {
                     HStack {
                         Image(systemName: "info.circle")
                             .foregroundColor(.blue)
@@ -257,8 +327,12 @@ struct SettingsView: View {
                         }
                     }
                 }
+                    }
+                    .padding(AISpacing.md)
+                }
             }
             .navigationTitle("设置")
+            .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showingAPIKeySheet) {
                 APIKeyConfigView(apiKey: $apiKey)
             }
@@ -267,6 +341,24 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingAdviceHistory) {
                 AdviceHistoryView()
+            }
+            .sheet(isPresented: $showingProviderSheet) {
+                AIProviderSelectionView(
+                    selectedProvider: $selectedProvider,
+                    baseURL: $baseURL,
+                    customBaseURL: $customBaseURL,
+                    showingCustomURLSheet: $showingCustomURLSheet
+                )
+            }
+            .sheet(isPresented: $showingCustomURLSheet) {
+                CustomURLConfigView(
+                    customBaseURL: $customBaseURL,
+                    baseURL: $baseURL
+                )
+            }
+            .onAppear {
+                // 根据保存的baseURL确定当前选中的提供商
+                selectedProvider = AIProvider.from(baseURL: baseURL)
             }
             .alert("清除缓存", isPresented: $showingClearDataAlert) {
                 Button("取消", role: .cancel) { }
@@ -299,6 +391,13 @@ struct SettingsView: View {
         }
         
         adviceCategories = categories.joined(separator: ",")
+    }
+    
+    private var currentProviderName: String {
+        if baseURL.isEmpty {
+            return AIProvider.openAI.name
+        }
+        return AIProvider.from(baseURL: baseURL).name
     }
     
     private func clearLocalCache() {
@@ -478,6 +577,322 @@ struct FeatureRow: View {
             
             Spacer()
         }
+    }
+}
+
+// MARK: - AI服务提供商选择视图
+struct AIProviderSelectionView: View {
+    @Binding var selectedProvider: AIProvider
+    @Binding var baseURL: String
+    @Binding var customBaseURL: String
+    @Binding var showingCustomURLSheet: Bool
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            List {
+                Section(header: Text("选择AI服务提供商")) {
+                    ForEach(AIProvider.allProviders, id: \.name) { provider in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(provider.name)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                
+                                if !provider.isCustom {
+                                    Text(provider.baseURL)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            Spacer()
+                            
+                            if selectedProvider.name == provider.name {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedProvider = provider
+                            
+                            if provider.isCustom {
+                                // 如果选择自定义，显示URL输入界面
+                                showingCustomURLSheet = true
+                            } else {
+                                // 保存预设的baseURL
+                                baseURL = provider.baseURL
+                                dismiss()
+                            }
+                        }
+                    }
+                }
+                
+                Section(footer: Text("选择您偏好的AI服务提供商。不同提供商可能有不同的定价和性能特点。")) {
+                    EmptyView()
+                }
+            }
+            .navigationTitle("AI服务提供商")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("完成") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 自定义URL配置视图
+struct CustomURLConfigView: View {
+    @Binding var customBaseURL: String
+    @Binding var baseURL: String
+    @State private var tempURL = ""
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    TextField("https://api.example.com/v1", text: $tempURL)
+                        .textContentType(.URL)
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                } header: {
+                    Text("自定义API地址")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("请输入完整的API基础地址，例如：")
+                        Text("https://api.example.com/v1")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("系统会自动添加/chat/completions端点")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("使用说明", systemImage: "info.circle")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        
+                        Text("• 确保API兼容OpenAI格式")
+                        Text("• 输入基础URL，不包含具体端点")
+                        Text("• 支持https://和http://协议")
+                        Text("• 确保网络可以访问该地址")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("自定义API地址")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("取消") {
+                        dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("保存") {
+                        baseURL = tempURL
+                        customBaseURL = tempURL
+                        dismiss()
+                    }
+                    .disabled(tempURL.isEmpty || !isValidURL(tempURL))
+                }
+            }
+        }
+        .onAppear {
+            tempURL = customBaseURL
+        }
+    }
+    
+    private func isValidURL(_ string: String) -> Bool {
+        guard let url = URL(string: string) else { return false }
+        return url.scheme == "https" || url.scheme == "http"
+    }
+}
+
+// MARK: - 现代化设置UI组件
+
+struct ModernSettingsSection<Content: View>: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let footer: String?
+    let content: Content
+    
+    init(
+        title: String,
+        icon: String,
+        color: Color,
+        footer: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.icon = icon
+        self.color = color
+        self.footer = footer
+        self.content = content()
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: AISpacing.md) {
+            // 区域标题
+            HStack {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundColor(color)
+                
+                Text(title)
+                    .font(AITypography.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(AITheme.textPrimary)
+            }
+            .padding(.horizontal, AISpacing.sm)
+            
+            // 设置项内容
+            AICard {
+                VStack(spacing: AISpacing.md) {
+                    content
+                }
+            }
+            
+            // 底部说明文字
+            if let footer = footer {
+                Text(footer)
+                    .font(AITypography.caption)
+                    .foregroundColor(AITheme.textSecondary)
+                    .padding(.horizontal, AISpacing.sm)
+            }
+        }
+    }
+}
+
+struct ModernSettingsRow: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let subtitle: String?
+    let value: String?
+    let valueColor: Color?
+    let showArrow: Bool
+    let action: (() -> Void)?
+    
+    init(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        subtitle: String? = nil,
+        value: String? = nil,
+        valueColor: Color? = nil,
+        showArrow: Bool = true,
+        action: (() -> Void)? = nil
+    ) {
+        self.icon = icon
+        self.iconColor = iconColor
+        self.title = title
+        self.subtitle = subtitle
+        self.value = value
+        self.valueColor = valueColor
+        self.showArrow = showArrow
+        self.action = action
+    }
+    
+    var body: some View {
+        Button(action: action ?? {}) {
+            HStack(spacing: AISpacing.md) {
+                // 图标
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundColor(iconColor)
+                    .frame(width: 24, alignment: .center)
+                
+                // 标题和副标题
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(AITypography.body)
+                        .foregroundColor(AITheme.textPrimary)
+                        .multilineTextAlignment(.leading)
+                    
+                    if let subtitle = subtitle {
+                        Text(subtitle)
+                            .font(AITypography.caption)
+                            .foregroundColor(AITheme.textSecondary)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                
+                Spacer()
+                
+                // 值和箭头
+                HStack(spacing: AISpacing.sm) {
+                    if let value = value {
+                        Text(value)
+                            .font(AITypography.caption)
+                            .foregroundColor(valueColor ?? AITheme.textSecondary)
+                    }
+                    
+                    if showArrow {
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(AITheme.textSecondary)
+                    }
+                }
+            }
+            .padding(.vertical, AISpacing.xs)
+        }
+        .disabled(action == nil)
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct ModernSettingsToggle: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let subtitle: String?
+    @Binding var isOn: Bool
+    
+    var body: some View {
+        HStack(spacing: AISpacing.md) {
+            // 图标
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(iconColor)
+                .frame(width: 24, alignment: .center)
+            
+            // 标题和副标题
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(AITypography.body)
+                    .foregroundColor(AITheme.textPrimary)
+                    .multilineTextAlignment(.leading)
+                
+                if let subtitle = subtitle {
+                    Text(subtitle)
+                        .font(AITypography.caption)
+                        .foregroundColor(AITheme.textSecondary)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            
+            Spacer()
+            
+            // 开关
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .tint(AITheme.accent)
+        }
+        .padding(.vertical, AISpacing.xs)
     }
 }
 

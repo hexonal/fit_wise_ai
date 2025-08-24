@@ -1,0 +1,563 @@
+//
+//  EventDrivenHealthDataViewModel.swift
+//  fit_wise_ai
+//
+//  Created by AI on 2025/8/24.
+//
+
+import Foundation
+import SwiftUI
+import Combine
+import OSLog
+
+/**
+ * 事件驱动的健康数据视图模型
+ * 
+ * 重构后的ViewModel，完全基于事件驱动架构：
+ * - 通过事件与Actor系统交互
+ * - 订阅事件流更新UI状态
+ * - 提供响应式的用户界面绑定
+ * - 支持状态回放和调试
+ */
+@MainActor
+class EventDrivenHealthDataViewModel: ObservableObject {
+    
+    // MARK: - Published Properties
+    
+    /// 健康数据状态
+    @Published private(set) var healthData: HealthData = HealthData()
+    /// 历史健康数据（7天）
+    @Published private(set) var weeklyHealthData: [HealthData] = []
+    /// AI建议列表
+    @Published private(set) var aiAdvice: [AIAdvice] = []
+    /// 加载状态
+    @Published private(set) var isLoading = false
+    /// HealthKit授权状态
+    @Published private(set) var isHealthKitAuthorized = false
+    /// AI服务状态
+    @Published private(set) var isAIServiceReady = false
+    /// 错误状态
+    @Published private(set) var currentError: AppError?
+    /// 权限拒绝提示
+    @Published var showingPermissionAlert = false
+    /// 系统状态摘要
+    @Published private(set) var systemStatus: SystemStatus = SystemStatus()
+    
+    // MARK: - Private Properties
+    
+    /// 事件驱动的健康服务
+    private let healthService = EventDrivenHealthKitService()
+    /// 事件驱动的AI服务
+    private let aiService = EventDrivenAIService()
+    /// 事件总线引用
+    private let eventBus = EventBus.shared
+    /// Actor系统引用
+    private let actorSystem = ActorSystem.shared
+    /// 日志记录器
+    private let logger = Logger(subsystem: "fit_wise_ai", category: "EventDrivenHealthDataViewModel")
+    /// 取消订阅集合
+    private var cancellables = Set<AnyCancellable>()
+    /// 事件流订阅
+    private var eventSubscriptions = Set<AnyCancellable>()
+    
+    // MARK: - Initialization
+    
+    init() {
+        logger.info("EventDrivenHealthDataViewModel initializing")
+        setupServiceBindings()
+        setupEventSubscriptions()
+        initializeServices()
+    }
+    
+    deinit {
+        logger.info("EventDrivenHealthDataViewModel deinitialized")
+    }
+    
+    // MARK: - Service Initialization
+    
+    private func initializeServices() {
+        Task {
+            // 服务会自动初始化，我们只需要等待状态更新
+            logger.info("Services initializing automatically")
+        }
+    }
+    
+    // MARK: - Service Bindings
+    
+    private func setupServiceBindings() {
+        // 绑定健康服务状态
+        healthService.$currentState
+            .map { state in
+                switch state {
+                case .authorized: return true
+                default: return false
+                }
+            }
+            .assign(to: &$isHealthKitAuthorized)
+        
+        healthService.$latestHealthData
+            .compactMap { $0?.toHealthData() }
+            .assign(to: &$healthData)
+        
+        // 绑定AI服务状态
+        aiService.$currentState
+            .map { state in
+                switch state {
+                case .ready: return true
+                default: return false
+                }
+            }
+            .assign(to: &$isAIServiceReady)
+        
+        aiService.$latestAdvice
+            .map { snapshots in
+                snapshots.compactMap { $0.toAIAdvice() }
+            }
+            .assign(to: &$aiAdvice)
+        
+        // 合并加载状态
+        Publishers.CombineLatest(
+            healthService.$currentState,
+            aiService.$currentState
+        )
+        .map { healthState, aiState in
+            switch (healthState, aiState) {
+            case (.fetchingData, _), (_, .generating):
+                return true
+            case (.requestingPermissions, _), (.initializing, _), (_, .initializing):
+                return true
+            default:
+                return false
+            }
+        }
+        .assign(to: &$isLoading)
+        
+        logger.info("Service bindings established")
+    }
+    
+    // MARK: - Event Subscriptions
+    
+    private func setupEventSubscriptions() {
+        // 订阅健康数据更新事件
+        eventBus.eventPublisher(for: HealthDataUpdatedEvent.self)
+            .sink { [weak self] event in
+                self?.handleHealthDataUpdated(event)
+            }
+            .store(in: &eventSubscriptions)
+        
+        // 订阅AI建议生成事件
+        eventBus.eventPublisher(for: AIAdviceGeneratedEvent.self)
+            .sink { [weak self] event in
+                self?.handleAIAdviceGenerated(event)
+            }
+            .store(in: &eventSubscriptions)
+        
+        // 订阅权限拒绝事件
+        eventBus.eventPublisher(for: HealthPermissionDeniedEvent.self)
+            .sink { [weak self] event in
+                self?.handlePermissionDenied(event)
+            }
+            .store(in: &eventSubscriptions)
+        
+        // 订阅错误事件
+        eventBus.subscribeToAll { [weak self] event in
+            await self?.handleGenericEvent(event)
+            return .success
+        }
+        
+        logger.info("Event subscriptions established")
+    }
+    
+    // MARK: - Public Interface
+    
+    /**
+     * 请求HealthKit权限
+     */
+    func requestHealthKitPermission() async {
+        logger.info("Requesting HealthKit permission")
+        
+        let success = await healthService.requestAuthorization()
+        
+        if success {
+            logger.info("HealthKit permission granted, refreshing data")
+            await refreshAllData()
+        } else {
+            logger.warning("HealthKit permission denied")
+            showingPermissionAlert = true
+            currentError = AppError.permissionDenied("HealthKit权限被拒绝")
+        }
+    }
+    
+    /**
+     * 刷新所有数据
+     */
+    func refreshAllData() async {
+        logger.info("Refreshing all data")
+        
+        guard isHealthKitAuthorized else {
+            logger.warning("Cannot refresh data: HealthKit not authorized")
+            await requestHealthKitPermission()
+            return
+        }
+        
+        // 并发获取今日数据和历史数据
+        async let todayData = healthService.fetchTodayHealthData()
+        async let historicalData = fetchWeeklyData()
+        
+        // 等待数据获取完成
+        let (today, weekly) = await (todayData, historicalData)
+        
+        if let todaySnapshot = today {
+            healthData = todaySnapshot.toHealthData()
+        }
+        
+        weeklyHealthData = weekly
+        
+        // 基于健康数据生成AI建议
+        if !weeklyHealthData.isEmpty {
+            await generateAIAdvice()
+        }
+        
+        // 更新系统状态
+        await updateSystemStatus()
+        
+        logger.info("All data refreshed successfully")
+    }
+    
+    /**
+     * 生成AI建议
+     */
+    func generateAIAdvice() async {
+        logger.info("Generating AI advice")
+        
+        guard isAIServiceReady else {
+            logger.warning("AI service not ready")
+            currentError = AppError.serviceUnavailable("AI服务暂不可用")
+            return
+        }
+        
+        let advice = await aiService.generateAdvice(from: healthData)
+        
+        if advice.isEmpty {
+            logger.warning("No AI advice generated")
+            currentError = AppError.dataProcessingFailed("AI建议生成失败")
+        } else {
+            logger.info("AI advice generated: \(advice.count) pieces")
+            clearError()
+        }
+    }
+    
+    /**
+     * 生成周建议
+     */
+    func generateWeeklyAdvice() async {
+        logger.info("Generating weekly AI advice")
+        
+        guard isAIServiceReady && !weeklyHealthData.isEmpty else {
+            logger.warning("Cannot generate weekly advice: service not ready or no data")
+            return
+        }
+        
+        let advice = await aiService.generateWeeklyAdvice(from: weeklyHealthData)
+        
+        if !advice.isEmpty {
+            logger.info("Weekly AI advice generated: \(advice.count) pieces")
+        }
+    }
+    
+    /**
+     * 设置健康目标
+     */
+    func setHealthGoal(type: String, targetValue: Double, timeFrame: String) async -> Bool {
+        logger.info("Setting health goal: \(type) = \(targetValue)")
+        
+        let success = await healthService.setHealthGoal(
+            type: type,
+            targetValue: targetValue,
+            timeFrame: timeFrame
+        )
+        
+        if success {
+            logger.info("Health goal set successfully")
+            // 重新检查目标状态
+            await checkHealthGoals()
+        } else {
+            logger.error("Failed to set health goal")
+            currentError = AppError.operationFailed("健康目标设置失败")
+        }
+        
+        return success
+    }
+    
+    /**
+     * 检查健康目标
+     */
+    func checkHealthGoals() async {
+        logger.info("Checking health goals")
+        
+        let goalTypes = ["steps", "calories", "workout"]
+        
+        for goalType in goalTypes {
+            let result = await healthService.checkHealthGoal(goalType)
+            if result {
+                    logger.info("Health goal achieved: \(goalType)")
+                    // 这里可以显示祝贺消息或发送通知
+                }
+            }
+        }
+    }
+    
+    /**
+     * 评估AI建议质量
+     */
+    func evaluateAdviceQuality(adviceId: UUID, feedback: String, rating: Int) async {
+        logger.info("Evaluating advice quality: \(adviceId)")
+        
+        let success = await aiService.evaluateAdviceQuality(
+            adviceId: adviceId,
+            feedback: feedback,
+            rating: rating
+        )
+        
+        if success {
+            logger.info("Advice quality evaluation recorded")
+        } else {
+            logger.error("Failed to record advice quality evaluation")
+        }
+    }
+    
+    /**
+     * 获取系统诊断报告
+     */
+    func getDiagnosticsReport() async -> String {
+        logger.info("Generating diagnostics report")
+        
+        var report = "🏥 FitWise AI 系统诊断报告\n"
+        report += "生成时间: \(DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .medium))\n\n"
+        
+        // HealthKit服务诊断
+        let healthDiagnostics = await healthService.performDiagnostics()
+        report += healthDiagnostics + "\n"
+        
+        // AI服务诊断
+        let aiDiagnostics = await aiService.performDiagnostics()
+        report += aiDiagnostics + "\n"
+        
+        // Actor系统统计
+        let actorStats = actorSystem.getSystemStatistics()
+        report += "🎭 Actor系统统计\n"
+        report += "   总Actor数量: \(actorStats["totalActors"] ?? 0)\n"
+        if let actors = actorStats["actors"] as? [String: Any] {
+            for (name, stats) in actors {
+                if let actorStats = stats as? [String: Any] {
+                    report += "   \(name): 处理了\(actorStats["messagesProcessed"] ?? 0)条消息\n"
+                }
+            }
+        }
+        report += "\n"
+        
+        // 事件系统统计
+        let eventStats = await EventStore.shared.getEventStatistics()
+        report += "📊 事件存储统计\n"
+        report += "   总事件数: \(eventStats.totalEvents)\n"
+        report += "   事件类型: \(eventStats.eventTypeCount.count)\n"
+        if let timeSpan = eventStats.timeSpan {
+            report += "   时间跨度: \(String(format: "%.1f", timeSpan / 3600))小时\n"
+        }
+        
+        return report
+    }
+    
+    // MARK: - Event Handlers
+    
+    private func handleHealthDataUpdated(_ event: HealthDataUpdatedEvent) {
+        logger.info("Health data updated event received")
+        
+        // 数据会通过service binding自动更新
+        // 这里可以添加额外的处理逻辑
+        
+        // 清除任何相关错误
+        if case .dataProcessingFailed = currentError {
+            clearError()
+        }
+    }
+    
+    private func handleAIAdviceGenerated(_ event: AIAdviceGeneratedEvent) {
+        logger.info("AI advice generated event received: \(event.generatedAdvice.count) pieces")
+        
+        // 建议会通过service binding自动更新
+        // 这里可以添加成功通知或其他UI反馈
+        
+        // 清除AI相关错误
+        if case .serviceUnavailable = currentError {
+            clearError()
+        }
+    }
+    
+    private func handlePermissionDenied(_ event: HealthPermissionDeniedEvent) {
+        logger.warning("Health permission denied event received")
+        
+        showingPermissionAlert = true
+        currentError = AppError.permissionDenied("需要健康数据权限才能提供个性化建议")
+    }
+    
+    private func handleGenericEvent(_ event: any BaseEvent) async {
+        // 处理通用事件，主要用于调试和监控
+        if event.eventType.contains("Failed") || event.eventType.contains("Error") {
+            logger.error("Error event received: \(event.eventType) from \(event.source)")
+            
+            // 根据事件类型设置相应的错误状态
+            if event.source.contains("Health") {
+                currentError = AppError.dataProcessingFailed("健康数据处理失败")
+            } else if event.source.contains("AI") {
+                currentError = AppError.serviceUnavailable("AI服务暂时不可用")
+            }
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func fetchWeeklyData() async -> [HealthData] {
+        let endDate = Date()
+        let startDate = Calendar.current.date(byAdding: .day, value: -7, to: endDate)!
+        let dateRange = DateInterval(start: startDate, end: endDate)
+        
+        let snapshots = await healthService.fetchHistoricalHealthData(dateRange: dateRange)
+        return snapshots.map { $0.toHealthData() }
+    }
+    
+    private func updateSystemStatus() async {
+        let healthStatus = healthService.getStatusReport()
+        let aiStatus = aiService.getStatusReport()
+        
+        systemStatus = SystemStatus(
+            isHealthKitHealthy: healthStatus.isHealthy,
+            isAIServiceHealthy: aiStatus.isHealthy,
+            hasRecentHealthData: healthStatus.hasValidData,
+            hasRecentAIAdvice: aiStatus.hasRecentAdvice,
+            lastUpdated: Date()
+        )
+    }
+    
+    private func clearError() {
+        currentError = nil
+    }
+    
+    // MARK: - Development and Testing Methods
+    
+    #if DEBUG
+    /**
+     * 模拟健康数据更新（仅用于开发测试）
+     */
+    func simulateHealthDataUpdate() async {
+        logger.info("Simulating health data update for testing")
+        
+        let mockHealthData = HealthData(
+            steps: Int.random(in: 5000...15000),
+            heartRate: Double.random(in: 60...100),
+            activeEnergyBurned: Double.random(in: 200...800),
+            workoutTime: Double.random(in: 0...7200),
+            distanceWalkingRunning: Double.random(in: 1000...10000)
+        )
+        
+        healthData = mockHealthData
+        
+        // 发布模拟事件
+        await eventBus.publish(HealthDataUpdatedEvent(
+            previousData: nil,
+            currentData: HealthDataSnapshot(from: mockHealthData),
+            changedFields: ["steps", "heartRate", "activeEnergyBurned"],
+            source: "SimulationService"
+        ))
+    }
+    
+    /**
+     * 触发错误状态（仅用于开发测试）
+     */
+    func simulateError(_ error: AppError) {
+        logger.info("Simulating error for testing: \(error)")
+        currentError = error
+    }
+    #endif
+
+// MARK: - Supporting Types
+
+/**
+ * 应用错误类型
+ */
+enum AppError: Error, LocalizedError, Equatable {
+    case permissionDenied(String)
+    case serviceUnavailable(String)
+    case dataProcessingFailed(String)
+    case networkError(String)
+    case operationFailed(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .permissionDenied(let message),
+             .serviceUnavailable(let message),
+             .dataProcessingFailed(let message),
+             .networkError(let message),
+             .operationFailed(let message):
+            return message
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .permissionDenied: return "exclamationmark.shield"
+        case .serviceUnavailable: return "cloud.slash"
+        case .dataProcessingFailed: return "exclamationmark.triangle"
+        case .networkError: return "wifi.slash"
+        case .operationFailed: return "xmark.circle"
+        }
+    }
+}
+
+/**
+ * 系统状态摘要
+ */
+struct SystemStatus {
+    var isHealthKitHealthy: Bool = false
+    var isAIServiceHealthy: Bool = false
+    var hasRecentHealthData: Bool = false
+    var hasRecentAIAdvice: Bool = false
+    var lastUpdated: Date = Date()
+    
+    var overallHealth: SystemHealth {
+        if isHealthKitHealthy && isAIServiceHealthy && hasRecentHealthData {
+            return .excellent
+        } else if isHealthKitHealthy && (isAIServiceHealthy || hasRecentHealthData) {
+            return .good
+        } else if isHealthKitHealthy || isAIServiceHealthy {
+            return .fair
+        } else {
+            return .poor
+        }
+    }
+}
+
+enum SystemHealth: String, CaseIterable {
+    case excellent = "优秀"
+    case good = "良好"
+    case fair = "一般"
+    case poor = "较差"
+    
+    var color: String {
+        switch self {
+        case .excellent: return "appGreen"
+        case .good: return "appBlue"
+        case .fair: return "appOrange"
+        case .poor: return "appPurple"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .excellent: return "checkmark.circle.fill"
+        case .good: return "checkmark.circle"
+        case .fair: return "exclamationmark.circle"
+        case .poor: return "xmark.circle"
+        }
+    }
+}

@@ -1,0 +1,855 @@
+//
+//  AIActor.swift
+//  fit_wise_ai
+//
+//  Created by AI on 2025/8/24.
+//
+
+import Foundation
+import OSLog
+
+/**
+ * AI相关消息定义
+ */
+
+/// 生成AI建议消息
+struct GenerateAIAdviceMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "GenerateAIAdvice"
+    let requestType: AIRequestType
+    let inputData: AIInputDataSnapshot
+    let requestedCategories: [String]?
+}
+
+/// 生成周建议消息
+struct GenerateWeeklyAdviceMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "GenerateWeeklyAdvice"
+    let historicalData: [HealthDataSnapshot]
+    let userPreferences: [String: String]?
+}
+
+/// 更新AI配置消息
+struct UpdateAIConfigurationMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "UpdateAIConfiguration"
+    let configKey: String
+    let configValue: String
+}
+
+/// 获取AI建议历史消息
+struct GetAIAdviceHistoryMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "GetAIAdviceHistory"
+    let dateRange: DateInterval?
+    let category: String?
+}
+
+/// 评估AI建议质量消息
+struct EvaluateAdviceQualityMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "EvaluateAdviceQuality"
+    let adviceId: UUID
+    let userFeedback: String // "helpful", "not_helpful", "irrelevant"
+    let rating: Int // 1-5
+}
+
+/**
+ * AI Actor响应类型
+ */
+struct AIAdviceResponse: Sendable {
+    let advice: [AIAdviceSnapshot]
+    let generationMethod: AIGenerationMethod
+    let generationTime: TimeInterval
+    let confidence: Double
+    let modelVersion: String?
+}
+
+struct WeeklyAdviceResponse: Sendable {
+    let advice: [AIAdviceSnapshot]
+    let trendAnalysis: String
+    let recommendations: [String]
+    let generationTime: TimeInterval
+}
+
+struct AIConfigurationResponse: Sendable {
+    let configUpdated: Bool
+    let configKey: String
+    let previousValue: String?
+    let newValue: String
+}
+
+struct AIAdviceHistoryResponse: Sendable {
+    let adviceHistory: [AIAdviceSnapshot]
+    let totalCount: Int
+    let dateRange: DateInterval?
+}
+
+struct AdviceQualityResponse: Sendable {
+    let qualityUpdated: Bool
+    let adviceId: UUID
+    let newQualityScore: Double
+    let feedbackRecorded: Bool
+}
+
+/**
+ * AI Actor
+ * 
+ * 专门处理AI相关的业务逻辑，包括：
+ * - AI建议生成和管理
+ * - 多种AI生成策略（API、本地规则、混合）
+ * - AI建议质量评估和改进
+ * - 用户反馈处理和学习
+ */
+actor AIActor: BaseActor {
+    
+    // MARK: - Properties
+    
+    /// AI服务实例
+    private let aiService: AIService
+    /// 建议历史存储
+    private var adviceHistory: [AIAdviceSnapshot] = []
+    /// AI配置
+    private var aiConfiguration: [String: String] = [:]
+    /// 建议质量评分 (建议ID -> 评分)
+    private var adviceQualityScores: [UUID: AdviceQuality] = [:]
+    /// 用户偏好学习
+    private var userPreferences: UserPreferenceProfile = UserPreferenceProfile()
+    /// 生成策略
+    private var generationStrategy: AIGenerationStrategy = .adaptive
+    /// API调用统计
+    private var apiStats = APICallStatistics()
+    
+    // MARK: - Initialization
+    
+    override init(name: String = "AIActor") {
+        self.aiService = AIService()
+        super.init(name: name)
+        
+        // 初始化默认配置
+        setupDefaultConfiguration()
+        
+        // 设置事件监听
+        Task {
+            await setupEventSubscriptions()
+        }
+    }
+    
+    // MARK: - Setup Methods
+    
+    private func setupDefaultConfiguration() {
+        aiConfiguration = [
+            "model": "gpt-3.5-turbo",
+            "temperature": "0.7",
+            "max_tokens": "800",
+            "generation_strategy": "adaptive",
+            "fallback_enabled": "true",
+            "cache_enabled": "true",
+            "quality_threshold": "0.7"
+        ]
+    }
+    
+    private func setupEventSubscriptions() async {
+        let eventBus = EventBus.shared
+        
+        // 监听健康数据更新事件，自动生成建议
+        eventBus.subscribe(to: HealthDataUpdatedEvent.self) { [weak self] event in
+            await self?.handleHealthDataUpdated(event)
+            return .success
+        }
+        
+        // 监听AI配置更新事件
+        eventBus.subscribe(to: AIConfigurationUpdatedEvent.self) { [weak self] event in
+            await self?.handleConfigurationUpdated(event)
+            return .success
+        }
+    }
+    
+    // MARK: - Message Handling
+    
+    override func handleMessage(_ message: any ActorMessage) async throws -> Any {
+        logger.debug("AIActor processing message: \(message.messageType)")
+        
+        switch message {
+        case let msg as GenerateAIAdviceMessage:
+            return try await handleGenerateAIAdvice(msg)
+        case let msg as GenerateWeeklyAdviceMessage:
+            return try await handleGenerateWeeklyAdvice(msg)
+        case let msg as UpdateAIConfigurationMessage:
+            return try await handleUpdateAIConfiguration(msg)
+        case let msg as GetAIAdviceHistoryMessage:
+            return try await handleGetAIAdviceHistory(msg)
+        case let msg as EvaluateAdviceQualityMessage:
+            return try await handleEvaluateAdviceQuality(msg)
+        default:
+            return try await super.handleMessage(message)
+        }
+    }
+    
+    // MARK: - AI Advice Generation
+    
+    private func handleGenerateAIAdvice(_ message: GenerateAIAdviceMessage) async throws -> AIAdviceResponse {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        // 发布AI建议请求事件
+        await publishEvent(AIAdviceRequestedEvent(
+            requestType: message.requestType,
+            inputData: message.inputData,
+            requestedCategories: message.requestedCategories,
+            source: name
+        ))
+        
+        do {
+            // 选择生成策略
+            let strategy = selectGenerationStrategy(for: message)
+            
+            var generatedAdvice: [AIAdviceSnapshot] = []
+            var usedMethod: AIGenerationMethod = .ruleBasedEngine
+            var modelVersion: String? = nil
+            
+            switch strategy {
+            case .apiOnly:
+                (generatedAdvice, usedMethod, modelVersion) = try await generateAdviceViaAPI(message)
+            case .rulesOnly:
+                (generatedAdvice, usedMethod, modelVersion) = await generateAdviceViaRules(message)
+            case .hybrid:
+                (generatedAdvice, usedMethod, modelVersion) = try await generateAdviceHybrid(message)
+            case .adaptive:
+                (generatedAdvice, usedMethod, modelVersion) = try await generateAdviceAdaptive(message)
+            }
+            
+            // 后处理：过滤和优化建议
+            let filteredAdvice = await postProcessAdvice(generatedAdvice, for: message)
+            
+            // 计算置信度
+            let confidence = calculateAdviceConfidence(filteredAdvice, method: usedMethod)
+            
+            // 存储到历史记录
+            adviceHistory.append(contentsOf: filteredAdvice)
+            
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            
+            // 发布生成成功事件
+            await publishEvent(AIAdviceGeneratedEvent(
+                generatedAdvice: filteredAdvice,
+                generationMethod: usedMethod,
+                generationDuration: duration,
+                modelVersion: modelVersion,
+                source: name
+            ))
+            
+            logger.info("AI advice generated: \(filteredAdvice.count) pieces in \(String(format: "%.2f", duration * 1000))ms using \(usedMethod.rawValue)")
+            
+            return AIAdviceResponse(
+                advice: filteredAdvice,
+                generationMethod: usedMethod,
+                generationTime: duration,
+                confidence: confidence,
+                modelVersion: modelVersion
+            )
+            
+        } catch {
+            // 降级处理
+            let fallbackAdvice = await generateFallbackAdvice(message)
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            
+            // 发布生成失败事件（带降级）
+            await publishEvent(AIAdviceGenerationFailedEvent(
+                error: error,
+                failureReason: categorizeError(error),
+                fallbackUsed: !fallbackAdvice.isEmpty,
+                fallbackAdvice: fallbackAdvice,
+                source: name
+            ))
+            
+            if !fallbackAdvice.isEmpty {
+                logger.warning("AI advice generation failed, using fallback: \(fallbackAdvice.count) pieces")
+                
+                return AIAdviceResponse(
+                    advice: fallbackAdvice,
+                    generationMethod: .ruleBasedEngine,
+                    generationTime: duration,
+                    confidence: 0.6, // 降级建议的置信度较低
+                    modelVersion: "fallback_v1.0"
+                )
+            } else {
+                throw ActorError.messageProcessingFailed(error)
+            }
+        }
+    }
+    
+    private func handleGenerateWeeklyAdvice(_ message: GenerateWeeklyAdviceMessage) async throws -> WeeklyAdviceResponse {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        // 分析历史数据趋势
+        let trendAnalysis = analyzeHealthTrends(message.historicalData)
+        
+        // 创建周建议输入数据
+        let inputData = AIInputDataSnapshot(
+            healthData: message.historicalData.last,
+            historicalData: message.historicalData,
+            userPreferences: message.userPreferences,
+            context: ["analysis_type": "weekly", "trend": trendAnalysis]
+        )
+        
+        // 生成周建议
+        let adviceMessage = GenerateAIAdviceMessage(
+            requestType: .weeklyAdvice,
+            inputData: inputData,
+            requestedCategories: nil
+        )
+        
+        let adviceResponse = try await handleGenerateAIAdvice(adviceMessage)
+        
+        // 生成推荐建议
+        let recommendations = generateWeeklyRecommendations(
+            from: message.historicalData,
+            trends: trendAnalysis
+        )
+        
+        let duration = CFAbsoluteTimeGetCurrent() - startTime
+        
+        logger.info("Weekly advice generated with \(recommendations.count) recommendations in \(String(format: "%.2f", duration * 1000))ms")
+        
+        return WeeklyAdviceResponse(
+            advice: adviceResponse.advice,
+            trendAnalysis: trendAnalysis,
+            recommendations: recommendations,
+            generationTime: duration
+        )
+    }
+    
+    // MARK: - Configuration Management
+    
+    private func handleUpdateAIConfiguration(_ message: UpdateAIConfigurationMessage) async throws -> AIConfigurationResponse {
+        let previousValue = aiConfiguration[message.configKey]
+        aiConfiguration[message.configKey] = message.configValue
+        
+        // 应用配置更改
+        await applyConfigurationChange(key: message.configKey, value: message.configValue)
+        
+        // 发布配置更新事件
+        await publishEvent(AIConfigurationUpdatedEvent(
+            configKey: message.configKey,
+            previousValue: previousValue,
+            newValue: message.configValue,
+            source: name
+        ))
+        
+        logger.info("AI configuration updated: \(message.configKey) = \(message.configValue)")
+        
+        return AIConfigurationResponse(
+            configUpdated: true,
+            configKey: message.configKey,
+            previousValue: previousValue,
+            newValue: message.configValue
+        )
+    }
+    
+    // MARK: - History and Quality Management
+    
+    private func handleGetAIAdviceHistory(_ message: GetAIAdviceHistoryMessage) async throws -> AIAdviceHistoryResponse {
+        var filteredHistory = adviceHistory
+        
+        // 按日期范围过滤
+        if let dateRange = message.dateRange {
+            filteredHistory = filteredHistory.filter { advice in
+                dateRange.contains(advice.createdAt)
+            }
+        }
+        
+        // 按类别过滤
+        if let category = message.category {
+            filteredHistory = filteredHistory.filter { advice in
+                advice.category.lowercased() == category.lowercased()
+            }
+        }
+        
+        return AIAdviceHistoryResponse(
+            adviceHistory: filteredHistory,
+            totalCount: adviceHistory.count,
+            dateRange: message.dateRange
+        )
+    }
+    
+    private func handleEvaluateAdviceQuality(_ message: EvaluateAdviceQualityMessage) async throws -> AdviceQualityResponse {
+        // 记录用户反馈
+        let quality = AdviceQuality(
+            rating: message.rating,
+            feedback: message.userFeedback,
+            evaluatedAt: Date()
+        )
+        
+        adviceQualityScores[message.adviceId] = quality
+        
+        // 更新用户偏好学习
+        updateUserPreferences(based: message)
+        
+        // 计算新的质量分数
+        let newQualityScore = calculateQualityScore(for: message.adviceId)
+        
+        logger.info("Advice quality evaluated: \(message.adviceId) rated \(message.rating)/5 (\(message.userFeedback))")
+        
+        return AdviceQualityResponse(
+            qualityUpdated: true,
+            adviceId: message.adviceId,
+            newQualityScore: newQualityScore,
+            feedbackRecorded: true
+        )
+    }
+    
+    // MARK: - Event Handlers
+    
+    private func handleHealthDataUpdated(_ event: HealthDataUpdatedEvent) async {
+        // 检查是否需要自动生成建议
+        let shouldAutoGenerate = aiConfiguration["auto_generate"] == "true"
+        guard shouldAutoGenerate else { return }
+        
+        // 检查数据变化是否显著
+        guard isSignificantChange(event.changedFields) else { return }
+        
+        logger.info("Significant health data change detected, auto-generating advice")
+        
+        do {
+            let inputData = AIInputDataSnapshot(
+                healthData: event.currentData,
+                context: ["trigger": "health_data_updated"]
+            )
+            
+            let message = GenerateAIAdviceMessage(
+                requestType: .realTimeAdvice,
+                inputData: inputData,
+                requestedCategories: nil
+            )
+            
+            let _ = try await handleGenerateAIAdvice(message)
+        } catch {
+            logger.error("Auto advice generation failed: \(error)")
+        }
+    }
+    
+    private func handleConfigurationUpdated(_ event: AIConfigurationUpdatedEvent) async {
+        // 同步配置更改
+        aiConfiguration[event.configKey] = event.newValue
+        await applyConfigurationChange(key: event.configKey, value: event.newValue)
+    }
+    
+    // MARK: - Generation Strategies
+    
+    private func selectGenerationStrategy(for message: GenerateAIAdviceMessage) -> AIGenerationStrategy {
+        // 根据配置和上下文选择策略
+        let strategySetting = aiConfiguration["generation_strategy"] ?? "adaptive"
+        
+        switch strategySetting {
+        case "api_only": return .apiOnly
+        case "rules_only": return .rulesOnly
+        case "hybrid": return .hybrid
+        default: return .adaptive
+        }
+    }
+    
+    private func generateAdviceViaAPI(_ message: GenerateAIAdviceMessage) async throws -> ([AIAdviceSnapshot], AIGenerationMethod, String?) {
+        // 发布API调用开始事件
+        await publishEvent(AIAPICallStartedEvent(
+            endpoint: "openai.com/v1/chat/completions",
+            model: aiConfiguration["model"] ?? "gpt-3.5-turbo",
+            requestSummary: "Health advice generation",
+            source: name
+        ))
+        
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        do {
+            // 构建健康数据
+            let healthData = message.inputData.healthData?.toHealthData() ?? HealthData()
+            
+            // 调用AI服务
+            await aiService.generateAdvice(from: healthData)
+            
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            
+            // 转换为快照
+            let snapshots = aiService.advice.compactMap { advice in
+                AIAdviceSnapshot(from: advice, confidence: 0.9, reasoning: "Generated via OpenAI API")
+            }
+            
+            // 更新API统计
+            apiStats.recordSuccessfulCall(duration: duration)
+            
+            // 发布API调用成功事件
+            await publishEvent(AIAPICallCompletedEvent(
+                statusCode: 200,
+                duration: duration,
+                tokenUsage: nil, // 实际使用中应该从API响应中获取
+                responseSummary: "Generated \(snapshots.count) advice pieces",
+                source: name
+            ))
+            
+            return (snapshots, .openaiAPI, aiConfiguration["model"])
+        } catch {
+            apiStats.recordFailedCall()
+            
+            await publishEvent(AIAPICallFailedEvent(
+                error: error,
+                statusCode: nil,
+                retryCount: 0,
+                willRetry: false,
+                source: name
+            ))
+            
+            throw error
+        }
+    }
+    
+    private func generateAdviceViaRules(_ message: GenerateAIAdviceMessage) async -> ([AIAdviceSnapshot], AIGenerationMethod, String?) {
+        // 使用本地规则引擎生成建议
+        guard let healthData = message.inputData.healthData?.toHealthData() else {
+            return ([], .ruleBasedEngine, "rules_v1.0")
+        }
+        
+        // 生成基于规则的建议
+        let advice = generateRuleBasedAdvice(from: healthData, userPreferences: userPreferences)
+        let snapshots = advice.map { AIAdviceSnapshot(from: $0, confidence: 0.8, reasoning: "Generated via rule-based engine") }
+        
+        return (snapshots, .ruleBasedEngine, "rules_v1.0")
+    }
+    
+    private func generateAdviceHybrid(_ message: GenerateAIAdviceMessage) async throws -> ([AIAdviceSnapshot], AIGenerationMethod, String?) {
+        // 混合策略：先尝试API，失败时使用规则
+        do {
+            return try await generateAdviceViaAPI(message)
+        } catch {
+            logger.warning("API generation failed, falling back to rules")
+            return await generateAdviceViaRules(message)
+        }
+    }
+    
+    private func generateAdviceAdaptive(_ message: GenerateAIAdviceMessage) async throws -> ([AIAdviceSnapshot], AIGenerationMethod, String?) {
+        // 自适应策略：根据历史成功率和延迟选择最佳方法
+        let apiSuccessRate = apiStats.successRate
+        let apiLatency = apiStats.averageLatency
+        
+        // 决策逻辑
+        if apiSuccessRate > 0.8 && apiLatency < 5.0 {
+            // API表现良好，优先使用
+            do {
+                return try await generateAdviceViaAPI(message)
+            } catch {
+                return await generateAdviceViaRules(message)
+            }
+        } else {
+            // API表现不佳，优先使用规则
+            return await generateAdviceViaRules(message)
+        }
+    }
+    
+    private func generateFallbackAdvice(_ message: GenerateAIAdviceMessage) async -> [AIAdviceSnapshot] {
+        // 最后的降级方案：生成基本的建议
+        guard let healthData = message.inputData.healthData?.toHealthData() else {
+            return generateDefaultAdvice()
+        }
+        
+        let basicAdvice = generateBasicAdvice(from: healthData)
+        return basicAdvice.map { AIAdviceSnapshot(from: $0, confidence: 0.5, reasoning: "Fallback advice") }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func postProcessAdvice(_ advice: [AIAdviceSnapshot], for message: GenerateAIAdviceMessage) async -> [AIAdviceSnapshot] {
+        var processedAdvice = advice
+        
+        // 去重
+        processedAdvice = removeDuplicateAdvice(processedAdvice)
+        
+        // 按优先级排序
+        processedAdvice = processedAdvice.sorted { advice1, advice2 in
+            let priority1 = getPriorityValue(advice1.priority)
+            let priority2 = getPriorityValue(advice2.priority)
+            return priority1 > priority2
+        }
+        
+        // 限制数量（最多5条建议）
+        if processedAdvice.count > 5 {
+            processedAdvice = Array(processedAdvice.prefix(5))
+        }
+        
+        // 个性化调整
+        processedAdvice = personalizeAdvice(processedAdvice, for: userPreferences)
+        
+        return processedAdvice
+    }
+    
+    private func calculateAdviceConfidence(_ advice: [AIAdviceSnapshot], method: AIGenerationMethod) -> Double {
+        guard !advice.isEmpty else { return 0 }
+        
+        let baseConfidence: Double
+        switch method {
+        case .openaiAPI: baseConfidence = 0.9
+        case .localModel: baseConfidence = 0.85
+        case .ruleBasedEngine: baseConfidence = 0.7
+        case .hybridApproach: baseConfidence = 0.8
+        }
+        
+        // 根据建议质量调整置信度
+        let avgConfidence = advice.compactMap { $0.confidence }.reduce(0, +) / Double(advice.count)
+        
+        return min(1.0, (baseConfidence + avgConfidence) / 2)
+    }
+    
+    private func analyzeHealthTrends(_ historicalData: [HealthDataSnapshot]) -> String {
+        guard historicalData.count >= 3 else { return "insufficient_data" }
+        
+        // 分析步数趋势
+        let recentSteps = historicalData.suffix(3).map { $0.steps }
+        let stepsTrend = analyzeTrend(recentSteps.map { Double($0) })
+        
+        // 分析活动能量趋势
+        let recentEnergy = historicalData.suffix(3).map { $0.activeEnergyBurned }
+        let energyTrend = analyzeTrend(recentEnergy)
+        
+        return "steps_\(stepsTrend)_energy_\(energyTrend)"
+    }
+    
+    private func analyzeTrend(_ values: [Double]) -> String {
+        guard values.count >= 2 else { return "stable" }
+        
+        let changes = zip(values.dropFirst(), values).map { $0 - $1 }
+        let avgChange = changes.reduce(0, +) / Double(changes.count)
+        
+        if avgChange > 0.1 { return "increasing" }
+        else if avgChange < -0.1 { return "decreasing" }
+        else { return "stable" }
+    }
+    
+    private func generateWeeklyRecommendations(from historicalData: [HealthDataSnapshot], trends: String) -> [String] {
+        var recommendations: [String] = []
+        
+        if trends.contains("decreasing") {
+            recommendations.append("考虑增加日常活动量，设定渐进式目标")
+            recommendations.append("尝试新的运动形式以保持兴趣")
+        }
+        
+        if trends.contains("increasing") {
+            recommendations.append("保持当前良好的运动习惯")
+            recommendations.append("注意适当休息，避免过度训练")
+        }
+        
+        // 基于历史数据的具体建议
+        let avgSteps = historicalData.map { $0.steps }.reduce(0, +) / historicalData.count
+        if avgSteps < 7000 {
+            recommendations.append("建议增加每日步数目标至8000-10000步")
+        }
+        
+        return recommendations
+    }
+    
+    private func isSignificantChange(_ changedFields: [String]) -> Bool {
+        let significantFields = ["steps", "activeEnergyBurned", "workoutTime"]
+        return changedFields.contains { significantFields.contains($0) }
+    }
+    
+    private func categorizeError(_ error: Error) -> AIFailureReason {
+        let errorString = error.localizedDescription.lowercased()
+        
+        if errorString.contains("network") || errorString.contains("connection") {
+            return .networkError
+        } else if errorString.contains("auth") || errorString.contains("token") {
+            return .authenticationError
+        } else if errorString.contains("quota") || errorString.contains("limit") {
+            return .quotaExceeded
+        } else if errorString.contains("input") || errorString.contains("format") {
+            return .invalidInput
+        } else if errorString.contains("server") || errorString.contains("5") {
+            return .serverError
+        } else {
+            return .unknownError
+        }
+    }
+    
+    private func applyConfigurationChange(key: String, value: String) async {
+        switch key {
+        case "generation_strategy":
+            if let strategy = AIGenerationStrategy.fromString(value) {
+                generationStrategy = strategy
+            }
+        case "temperature":
+            // 应用到AI服务配置
+            break
+        case "model":
+            // 更新使用的模型
+            break
+        default:
+            break
+        }
+    }
+    
+    private func updateUserPreferences(based evaluation: EvaluateAdviceQualityMessage) {
+        // 根据用户反馈更新偏好模型
+        // 这里可以实现机器学习算法来优化建议生成
+        userPreferences.updatePreference(
+            category: "feedback",
+            value: evaluation.userFeedback,
+            weight: Double(evaluation.rating) / 5.0
+        )
+    }
+    
+    private func calculateQualityScore(for adviceId: UUID) -> Double {
+        guard let quality = adviceQualityScores[adviceId] else { return 0.5 }
+        
+        // 基于评分和反馈计算质量分数
+        let ratingScore = Double(quality.rating) / 5.0
+        let feedbackScore = quality.feedback == "helpful" ? 1.0 : (quality.feedback == "not_helpful" ? 0.0 : 0.5)
+        
+        return (ratingScore + feedbackScore) / 2.0
+    }
+    
+    private func generateRuleBasedAdvice(from healthData: HealthData, userPreferences: UserPreferenceProfile) -> [AIAdvice] {
+        // 基于规则生成建议的实现
+        var advice: [AIAdvice] = []
+        
+        // 步数建议
+        if healthData.steps < 5000 {
+            advice.append(AIAdvice(
+                title: "增加日常步数",
+                content: "今日步数较少，建议增加30分钟散步",
+                category: .exercise,
+                priority: .high
+            ))
+        }
+        
+        // 运动建议
+        if healthData.workoutTime < 1800 { // 30分钟
+            advice.append(AIAdvice(
+                title: "增加运动时间",
+                content: "建议进行至少30分钟的有氧运动",
+                category: .exercise,
+                priority: .medium
+            ))
+        }
+        
+        // 休息建议
+        advice.append(AIAdvice(
+            title: "保持规律作息",
+            content: "确保充足睡眠，有助于身体恢复",
+            category: .rest,
+            priority: .medium
+        ))
+        
+        return advice
+    }
+    
+    private func generateBasicAdvice() -> [AIAdvice] {
+        return [
+            AIAdvice(title: "坚持运动", content: "保持每天至少30分钟运动", category: .exercise),
+            AIAdvice(title: "健康饮食", content: "均衡膳食，多吃蔬菜水果", category: .nutrition),
+            AIAdvice(title: "充足休息", content: "保证7-8小时优质睡眠", category: .rest)
+        ]
+    }
+    
+    private func generateDefaultAdvice() -> [AIAdviceSnapshot] {
+        let basicAdvice = generateBasicAdvice()
+        return basicAdvice.map { AIAdviceSnapshot(from: $0, confidence: 0.5, reasoning: "Default advice") }
+    }
+    
+    private func removeDuplicateAdvice(_ advice: [AIAdviceSnapshot]) -> [AIAdviceSnapshot] {
+        var seen = Set<String>()
+        return advice.filter { item in
+            let key = "\(item.category)_\(item.title)"
+            if seen.contains(key) {
+                return false
+            } else {
+                seen.insert(key)
+                return true
+            }
+        }
+    }
+    
+    private func getPriorityValue(_ priority: String) -> Int {
+        switch priority.lowercased() {
+        case "urgent", "紧急": return 4
+        case "high", "高": return 3
+        case "medium", "中": return 2
+        case "low", "低": return 1
+        default: return 2
+        }
+    }
+    
+    private func personalizeAdvice(_ advice: [AIAdviceSnapshot], for preferences: UserPreferenceProfile) -> [AIAdviceSnapshot] {
+        // 根据用户偏好调整建议
+        // 这里可以实现复杂的个性化逻辑
+        return advice
+    }
+    
+    private func generateBasicAdvice(from healthData: HealthData) -> [AIAdvice] {
+        // 简化版的规则建议生成
+        return generateRuleBasedAdvice(from: healthData, userPreferences: userPreferences)
+    }
+}
+
+// MARK: - Supporting Types
+
+enum AIGenerationStrategy {
+    case apiOnly
+    case rulesOnly
+    case hybrid
+    case adaptive
+    
+    static func fromString(_ string: String) -> AIGenerationStrategy? {
+        switch string.lowercased() {
+        case "api_only": return .apiOnly
+        case "rules_only": return .rulesOnly
+        case "hybrid": return .hybrid
+        case "adaptive": return .adaptive
+        default: return nil
+        }
+    }
+}
+
+private struct AdviceQuality {
+    let rating: Int
+    let feedback: String
+    let evaluatedAt: Date
+}
+
+private struct UserPreferenceProfile {
+    private var preferences: [String: (value: String, weight: Double)] = [:]
+    
+    mutating func updatePreference(category: String, value: String, weight: Double) {
+        preferences[category] = (value: value, weight: weight)
+    }
+    
+    func getPreference(for category: String) -> (value: String, weight: Double)? {
+        return preferences[category]
+    }
+}
+
+private struct APICallStatistics {
+    private var totalCalls: Int = 0
+    private var successfulCalls: Int = 0
+    private var totalLatency: TimeInterval = 0
+    
+    var successRate: Double {
+        guard totalCalls > 0 else { return 0 }
+        return Double(successfulCalls) / Double(totalCalls)
+    }
+    
+    var averageLatency: TimeInterval {
+        guard successfulCalls > 0 else { return 0 }
+        return totalLatency / Double(successfulCalls)
+    }
+    
+    mutating func recordSuccessfulCall(duration: TimeInterval) {
+        totalCalls += 1
+        successfulCalls += 1
+        totalLatency += duration
+    }
+    
+    mutating func recordFailedCall() {
+        totalCalls += 1
+    }
+}

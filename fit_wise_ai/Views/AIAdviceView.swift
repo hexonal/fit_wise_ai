@@ -17,218 +17,222 @@ struct AIAdviceView: View {
     @State private var showHistory = false
     
     var body: some View {
-        NavigationView {
-            if !healthKitService.isAuthorized {
-                // 未授权时显示提示
-                VStack(spacing: 20) {
-                    Image(systemName: "lock.shield")
-                        .font(.system(size: 60))
-                        .foregroundColor(.gray)
-                    
-                    Text("需要健康数据授权")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    
-                    Text("请先在首页授权访问健康数据，才能获取个性化的AI建议")
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal)
-                    
-                    Button(action: {
-                        Task {
-                            await healthKitService.requestAuthorization()
-                            if healthKitService.isAuthorized {
-                                await loadData()
+        NavigationStack {
+            ZStack {
+                // 透明背景以显示渐变
+                Color.clear
+                
+                if !healthKitService.isAuthorized {
+                    // 现代化未授权提示
+                    AIGradientCard(gradient: AITheme.primaryGradient) {
+                        VStack(spacing: AISpacing.lg) {
+                            Image(systemName: "lock.shield.fill")
+                                .font(.system(size: 64))
+                                .foregroundColor(.white)
+                            
+                            Text("需要健康数据授权")
+                                .font(AITypography.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                            
+                            Text("请先在首页授权访问健康数据，才能获取个性化的AI建议")
+                                .font(AITypography.body)
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(.white.opacity(0.9))
+                            
+                            AIPrimaryButton(
+                                "前往授权",
+                                icon: "heart.fill",
+                                isLoading: isRefreshing
+                            ) {
+                                Task {
+                                    await healthKitService.requestAuthorization()
+                                    if healthKitService.isAuthorized {
+                                        await loadData()
+                                    }
+                                }
                             }
                         }
-                    }) {
-                        Text("前往授权")
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .cornerRadius(12)
                     }
-                    .padding(.horizontal, 40)
-                }
-                .padding()
-                .navigationTitle("AI建议")
-            } else {
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // 数据概览卡片
-                        weeklyDataSummary
-                        
-                        // AI建议区域
-                        if aiService.isLoading {
-                            ProgressView("正在生成个性化建议...")
-                                .padding(40)
-                                .frame(maxWidth: .infinity)
-                                .background(Color.gray.opacity(0.1))
-                                .cornerRadius(12)
-                        } else if aiService.advice.isEmpty {
-                            emptyAdviceView
-                        } else {
-                            adviceSection
-                        }
-                    }
-                    .padding()
-                }
-                .navigationTitle("AI建议")
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            showHistory = true
-                        } label: {
-                            Image(systemName: "clock.arrow.circlepath")
-                        }
-                    }
-                    
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            Task {
-                                await refreshData()
-                            }
-                        } label: {
-                            if isRefreshing {
-                                ProgressView()
-                                    .scaleEffect(0.8)
+                    .padding(AISpacing.md)
+                    .navigationTitle("AI建议")
+                } else {
+                    ScrollView {
+                        VStack(spacing: AISpacing.lg) {
+                            // 现代化数据概览卡片
+                            modernWeeklyDataSummary
+                            
+                            // 现代化AI建议区域
+                            if aiService.isLoading {
+                                AILoadingView(message: "正在生成个性化建议...")
+                                    .padding(AISpacing.xl)
+                            } else if aiService.advice.isEmpty {
+                                modernEmptyAdviceView
                             } else {
-                                Image(systemName: "arrow.clockwise")
+                                modernAdviceSection
                             }
                         }
-                        .disabled(isRefreshing)
+                        .padding(AISpacing.md)
+                    }
+                    .navigationTitle("AI建议")
+                    .navigationBarTitleDisplayMode(.large)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button {
+                                showHistory = true
+                            } label: {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .foregroundColor(AITheme.accent)
+                            }
+                        }
+                        
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button {
+                                Task {
+                                    await refreshData()
+                                }
+                            } label: {
+                                if isRefreshing {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                        .tint(AITheme.accent)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .foregroundColor(AITheme.accent)
+                                }
+                            }
+                            .disabled(isRefreshing)
+                        }
+                    }
+                    .sheet(isPresented: $showHistory) {
+                        AdviceHistoryView()
+                    }
+                    .task {
+                        await loadData()
                     }
                 }
-                .sheet(isPresented: $showHistory) {
-                    AdviceHistoryView()
+            }
+        }
+    }
+    
+    // MARK: - 现代化Views
+    
+    private var modernWeeklyDataSummary: some View {
+        AICard {
+            VStack(alignment: .leading, spacing: AISpacing.md) {
+                HStack {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.title2)
+                        .foregroundColor(AITheme.accent)
+                    Text("近7天数据概览")
+                        .font(AITypography.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(AITheme.textPrimary)
+                    Spacer()
                 }
-                .task {
-                    await loadData()
+                
+                if !healthKitService.weeklyHealthData.isEmpty {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible()),
+                        GridItem(.flexible())
+                    ], spacing: AISpacing.md) {
+                        AIStatsCard(
+                            title: "平均步数",
+                            value: String(format: "%.0f", averageSteps),
+                            icon: "figure.walk",
+                            color: AITheme.accent
+                        )
+                        
+                        AIStatsCard(
+                            title: "总消耗",
+                            value: String(format: "%.0f", totalCalories),
+                            icon: "flame.fill",
+                            color: .orange
+                        )
+                        
+                        AIStatsCard(
+                            title: "运动时长",
+                            value: String(format: "%.0f min", totalWorkoutMinutes),
+                            icon: "timer",
+                            color: .green
+                        )
+                    }
+                } else {
+                    HStack {
+                        Spacer()
+                        VStack(spacing: AISpacing.sm) {
+                            ProgressView()
+                                .tint(AITheme.accent)
+                            Text("正在加载健康数据...")
+                                .font(AITypography.caption)
+                                .foregroundColor(AITheme.textSecondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, AISpacing.lg)
                 }
             }
         }
     }
     
-    // MARK: - Views
     
-    private var weeklyDataSummary: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .foregroundColor(.blue)
-                Text("近7天数据概览")
-                    .font(.headline)
-                Spacer()
-            }
-            
-            if !healthKitService.weeklyHealthData.isEmpty {
-                HStack(spacing: 15) {
-                    dataSummaryItem(
-                        title: "平均步数",
-                        value: String(format: "%.0f", averageSteps),
-                        icon: "figure.walk",
-                        color: .blue
-                    )
-                    
-                    dataSummaryItem(
-                        title: "总消耗",
-                        value: String(format: "%.0f kcal", totalCalories),
-                        icon: "flame.fill",
-                        color: .orange
-                    )
-                    
-                    dataSummaryItem(
-                        title: "运动时长",
-                        value: String(format: "%.0f min", totalWorkoutMinutes),
-                        icon: "timer",
-                        color: .green
-                    )
+    private var modernEmptyAdviceView: some View {
+        AICard {
+            VStack(spacing: AISpacing.lg) {
+                Image(systemName: "sparkles.rectangle.stack")
+                    .font(.system(size: 64))
+                    .foregroundStyle(AITheme.primaryGradient)
+                
+                Text("暂无AI建议")
+                    .font(AITypography.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(AITheme.textPrimary)
+                
+                Text("点击下方按钮获取个性化健康建议")
+                    .font(AITypography.body)
+                    .foregroundColor(AITheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                
+                AIPrimaryButton(
+                    "生成AI建议",
+                    icon: "sparkles",
+                    isLoading: isRefreshing
+                ) {
+                    Task {
+                        await refreshData()
+                    }
                 }
-            } else {
-                Text("正在加载健康数据...")
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 20)
             }
+            .padding(AISpacing.lg)
         }
-        .padding()
-        .background(Color(UIColor.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
     }
     
-    private func dataSummaryItem(title: String, value: String, icon: String, color: Color) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(color)
-            
-            Text(value)
-                .font(.system(.body, design: .rounded))
-                .fontWeight(.semibold)
-            
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-    
-    private var emptyAdviceView: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "lightbulb.circle")
-                .font(.system(size: 60))
-                .foregroundColor(.gray)
-            
-            Text("暂无AI建议")
-                .font(.headline)
-                .foregroundColor(.primary)
-            
-            Text("点击刷新按钮获取个性化健康建议")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-            
-            Button {
-                Task {
-                    await refreshData()
-                }
-            } label: {
-                Label("生成建议", systemImage: "sparkles")
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(20)
-            }
-        }
-        .padding(40)
-        .frame(maxWidth: .infinity)
-        .background(Color.gray.opacity(0.05))
-        .cornerRadius(12)
-    }
-    
-    private var adviceSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+    private var modernAdviceSection: some View {
+        VStack(alignment: .leading, spacing: AISpacing.lg) {
             HStack {
                 Image(systemName: "sparkles")
-                    .foregroundColor(.purple)
+                    .font(.title2)
+                    .foregroundStyle(AITheme.primaryGradient)
                 Text("个性化建议")
-                    .font(.headline)
+                    .font(AITypography.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(AITheme.textPrimary)
                 Spacer()
                 Text("\(aiService.advice.count)条")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 8)
+                    .font(AITypography.caption)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, AISpacing.sm)
                     .padding(.vertical, 4)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
+                    .background(AITheme.accent)
+                    .cornerRadius(AIRadius.sm)
             }
             
-            ForEach(aiService.advice) { advice in
-                AdviceCard(advice: advice) {
-                    selectedAdvice = advice
+            LazyVStack(spacing: AISpacing.md) {
+                ForEach(aiService.advice) { advice in
+                    ModernAdviceCard(advice: advice) {
+                        selectedAdvice = advice
+                    }
                 }
             }
         }
@@ -277,56 +281,81 @@ struct AIAdviceView: View {
     }
 }
 
-// MARK: - AdviceCard Component
+// MARK: - Modern AdviceCard Component
 
-struct AdviceCard: View {
+struct ModernAdviceCard: View {
     let advice: AIAdvice
     let onTap: () -> Void
     
     @State private var isCompleted = false
+    @State private var isPressed = false
     
     var body: some View {
-        HStack(spacing: 12) {
-            // 类别图标
-            Image(systemName: categoryIcon)
-                .font(.title2)
-                .foregroundColor(categoryColor)
-                .frame(width: 40, height: 40)
-                .background(categoryColor.opacity(0.1))
-                .cornerRadius(10)
-            
-            // 建议内容
-            VStack(alignment: .leading, spacing: 4) {
-                Text(advice.title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(isCompleted ? .secondary : .primary)
-                
-                Text(advice.content)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-            }
-            
-            Spacer()
-            
-            // 完成按钮
-            Button {
-                withAnimation(.spring()) {
-                    isCompleted.toggle()
+        AICard(padding: AISpacing.lg, isElevated: !isCompleted) {
+            HStack(spacing: AISpacing.md) {
+                // 现代化类别图标
+                ZStack {
+                    Circle()
+                        .fill(categoryGradient)
+                        .frame(width: 50, height: 50)
+                    
+                    Image(systemName: categoryIcon)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
                 }
-            } label: {
-                Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundColor(isCompleted ? .green : .gray)
+                .shadow(color: categoryColor.opacity(0.3), radius: 8, x: 0, y: 4)
+                
+                // 建议内容
+                VStack(alignment: .leading, spacing: AISpacing.xs) {
+                    Text(advice.title)
+                        .font(AITypography.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(isCompleted ? AITheme.textSecondary : AITheme.textPrimary)
+                    
+                    Text(advice.content)
+                        .font(AITypography.body)
+                        .foregroundColor(AITheme.textSecondary)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                }
+                
+                Spacer()
+                
+                // 现代化完成按钮
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                        isCompleted.toggle()
+                    }
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(isCompleted ? AITheme.success : AITheme.surface)
+                            .frame(width: 32, height: 32)
+                        
+                        if isCompleted {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.white)
+                        } else {
+                            Circle()
+                                .stroke(AITheme.textSecondary, lineWidth: 2)
+                                .frame(width: 20, height: 20)
+                        }
+                    }
+                }
             }
         }
-        .padding()
-        .background(isCompleted ? Color.gray.opacity(0.05) : Color(UIColor.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
+        .opacity(isCompleted ? 0.7 : 1.0)
+        .scaleEffect(isPressed ? 0.98 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isCompleted)
+        .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onTapGesture {
             onTap()
+        }
+        .onLongPressGesture(minimumDuration: 0) {
+            // 长按开始
+        } onPressingChanged: { pressing in
+            isPressed = pressing
         }
     }
     
@@ -346,13 +375,26 @@ struct AdviceCard: View {
     private var categoryColor: Color {
         switch advice.category {
         case .exercise:
-            return .blue
+            return AITheme.accent
         case .nutrition:
             return .green
         case .rest:
             return .purple
         case .general:
             return .orange
+        }
+    }
+    
+    private var categoryGradient: LinearGradient {
+        switch advice.category {
+        case .exercise:
+            return AITheme.primaryGradient
+        case .nutrition:
+            return LinearGradient(colors: [.green, Color(red: 0.2, green: 0.8, blue: 0.4)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case .rest:
+            return LinearGradient(colors: [.purple, Color(red: 0.6, green: 0.3, blue: 0.9)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case .general:
+            return LinearGradient(colors: [.orange, Color(red: 1.0, green: 0.7, blue: 0.2)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 }

@@ -1,0 +1,484 @@
+//
+//  BaseActor.swift
+//  fit_wise_ai
+//
+//  Created by AI on 2025/8/24.
+//
+
+import Foundation
+import OSLog
+import Combine
+
+/**
+ * Actor消息类型定义
+ */
+protocol ActorMessage: Sendable {
+    var id: UUID { get }
+    var timestamp: Date { get }
+    var messageType: String { get }
+}
+
+/**
+ * 默认消息实现
+ */
+struct DefaultMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType: String
+    let payload: [String: Any]?
+    
+    init(messageType: String, payload: [String: Any]? = nil) {
+        self.messageType = messageType
+        self.payload = payload
+    }
+}
+
+/**
+ * Actor状态定义
+ */
+enum ActorState: Equatable {
+    case idle          // 空闲状态
+    case processing    // 处理中
+    case error(String) // 错误状态
+    case stopped       // 已停止
+    
+    static func == (lhs: ActorState, rhs: ActorState) -> Bool {
+        switch (lhs, rhs) {
+        case (.idle, .idle), (.processing, .processing), (.stopped, .stopped):
+            return true
+        case (.error(let lhsMsg), .error(let rhsMsg)):
+            return lhsMsg == rhsMsg
+        default:
+            return false
+        }
+    }
+    
+    var isActive: Bool {
+        switch self {
+        case .idle, .processing:
+            return true
+        case .error, .stopped:
+            return false
+        }
+    }
+}
+
+/**
+ * Actor统计信息
+ */
+struct ActorStatistics {
+    var messagesProcessed: Int = 0
+    var messagesQueued: Int = 0
+    var averageProcessingTime: TimeInterval = 0
+    var lastProcessedAt: Date?
+    var errorCount: Int = 0
+    var uptime: TimeInterval = 0
+    
+    mutating func recordProcessing(duration: TimeInterval) {
+        messagesProcessed += 1
+        averageProcessingTime = (averageProcessingTime + duration) / 2
+        lastProcessedAt = Date()
+    }
+    
+    mutating func recordError() {
+        errorCount += 1
+    }
+}
+
+/**
+ * 基础Actor协议
+ * 
+ * 定义了Actor模式的核心接口，所有Actor都必须实现此协议
+ */
+protocol ActorProtocol: AnyObject, Sendable {
+    /// Actor唯一标识符
+    nonisolated var id: UUID { get }
+    /// Actor名称
+    nonisolated var name: String { get }
+    
+    /// 获取当前状态 (异步方法)
+    func getState() async -> ActorState
+    /// 获取统计信息 (异步方法)
+    func getStatistics() async -> ActorStatistics
+    
+    /// 启动Actor
+    func start() async
+    /// 停止Actor
+    func stop() async
+    /// 处理消息
+    func tell(_ message: any ActorMessage) async
+    /// 请求-响应模式
+    func ask<Response: Sendable>(_ message: any ActorMessage) async throws -> Response
+}
+
+/**
+ * 基础Actor实现
+ * 
+ * 提供Actor的基础功能实现，包括：
+ * - 消息队列管理
+ * - 状态管理
+ * - 错误处理
+ * - 统计信息收集
+ */
+actor BaseActor: ActorProtocol {
+    
+    // MARK: - Properties
+    
+    nonisolated let id = UUID()
+    nonisolated let name: String
+    private(set) var state: ActorState = .idle
+    private(set) var statistics = ActorStatistics()
+    
+    /// 消息队列
+    private var messageQueue: [any ActorMessage] = []
+    /// 响应等待队列 (消息ID -> 回调)
+    private var pendingResponses: [UUID: CheckedContinuation<Any, Error>] = [:]
+    /// 日志记录器
+    nonisolated let logger: Logger
+    /// 事件总线引用
+    private let eventBus = EventBus.shared
+    /// Actor创建时间
+    private let startTime = Date()
+    /// 处理任务取消令牌
+    private var processingTask: Task<Void, Never>?
+    
+    // MARK: - Initialization
+    
+    init(name: String) {
+        self.name = name
+        self.logger = Logger(subsystem: "fit_wise_ai", category: "Actor.\(name)")
+        logger.info("Actor \(name) initialized with id: \(id)")
+    }
+    
+    // MARK: - Protocol Methods
+    
+    func getState() async -> ActorState {
+        return state
+    }
+    
+    func getStatistics() async -> ActorStatistics {
+        return statistics
+    }
+    
+    deinit {
+        logger.info("Actor \(name) deinitialized")
+    }
+    
+    // MARK: - Lifecycle Management
+    
+    func start() async {
+        guard await getState() != .processing else {
+            logger.warning("Actor \(self.name) is already running")
+            return
+        }
+        
+        state = .idle
+        statistics.uptime = Date().timeIntervalSince(startTime)
+        
+        // 启动消息处理循环
+        processingTask = Task { [weak self] in
+            await self?.processMessageLoop()
+        }
+        
+        logger.info("Actor \(self.name) started")
+        
+        // 发布Actor启动事件
+        await publishEvent(DefaultEvent(
+            eventType: "ActorStarted",
+            source: name,
+            metadata: ["actorId": self.id.uuidString]
+        ))
+    }
+    
+    func stop() async {
+        guard (await getState()).isActive else {
+            logger.warning("Actor \(self.name) is not running")
+            return
+        }
+        
+        state = .stopped
+        
+        // 取消处理任务
+        processingTask?.cancel()
+        processingTask = nil
+        
+        // 清理待处理的响应
+        for continuation in pendingResponses.values {
+            continuation.resume(throwing: ActorError.actorStopped)
+        }
+        pendingResponses.removeAll()
+        
+        logger.info("Actor \(self.name) stopped")
+        
+        // 发布Actor停止事件
+        await publishEvent(DefaultEvent(
+            eventType: "ActorStopped",
+            source: name,
+            metadata: [
+                "actorId": id.uuidString,
+                "messagesProcessed": String(statistics.messagesProcessed),
+                "uptime": String(statistics.uptime)
+            ]
+        ))
+    }
+    
+    // MARK: - Message Handling
+    
+    func tell(_ message: any ActorMessage) async {
+        guard state.isActive else {
+            logger.warning("Cannot send message to stopped actor \(self.name)")
+            return
+        }
+        
+        messageQueue.append(message)
+        statistics.messagesQueued += 1
+        
+        logger.debug("Message queued in \(name): \(message.messageType)")
+    }
+    
+    func ask<Response: Sendable>(_ message: any ActorMessage) async throws -> Response {
+        guard state.isActive else {
+            throw ActorError.actorStopped
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            Task {
+                pendingResponses[message.id] = continuation
+                await tell(message)
+            }
+        }
+    }
+    
+    // MARK: - Message Processing Loop
+    
+    private func processMessageLoop() async {
+        logger.info("Message processing loop started for \(name)")
+        
+        while state.isActive && !Task.isCancelled {
+            if messageQueue.isEmpty {
+                // 短暂休眠避免忙等待
+                try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+                continue
+            }
+            
+            let message = messageQueue.removeFirst()
+            statistics.messagesQueued -= 1
+            
+            await processMessage(message)
+        }
+        
+        logger.info("Message processing loop ended for \(name)")
+    }
+    
+    private func processMessage(_ message: any ActorMessage) async {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        state = .processing
+        
+        do {
+            let response = try await handleMessage(message)
+            
+            // 如果有等待的响应，发送回复
+            if let continuation = pendingResponses.removeValue(forKey: message.id) {
+                continuation.resume(returning: response)
+            }
+            
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            statistics.recordProcessing(duration: duration)
+            
+            state = .idle
+            
+            logger.debug("Message processed in \(name): \(message.messageType) took \(String(format: "%.2f", duration * 1000))ms")
+            
+        } catch {
+            statistics.recordError()
+            state = .error(error)
+            
+            // 如果有等待的响应，发送错误
+            if let continuation = pendingResponses.removeValue(forKey: message.id) {
+                continuation.resume(throwing: error)
+            }
+            
+            logger.error("Message processing failed in \(name): \(message.messageType), error: \(error.localizedDescription)")
+            
+            // 发布错误事件
+            await publishEvent(DefaultEvent(
+                eventType: "ActorMessageProcessingFailed",
+                source: name,
+                metadata: [
+                    "actorId": id.uuidString,
+                    "messageType": message.messageType,
+                    "error": error.localizedDescription
+                ]
+            ))
+            
+            // 从错误状态恢复到空闲状态
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            if state.isActive {
+                state = .idle
+            }
+        }
+    }
+    
+    /**
+     * 子类需要重写的消息处理方法
+     */
+    func handleMessage(_ message: any ActorMessage) async throws -> Any {
+        logger.warning("Unhandled message type: \(message.messageType) in actor \(name)")
+        return "OK"
+    }
+    
+    // MARK: - Event Publishing
+    
+    func publishEvent(_ event: any BaseEvent) async {
+        await eventBus.publish(event)
+    }
+    
+    // MARK: - Utility Methods
+    
+    /**
+     * 获取当前队列大小
+     */
+    func getQueueSize() -> Int {
+        return messageQueue.count
+    }
+    
+    /**
+     * 清空消息队列
+     */
+    func clearQueue() async {
+        let clearedCount = messageQueue.count
+        messageQueue.removeAll()
+        statistics.messagesQueued = 0
+        
+        logger.info("Cleared \(clearedCount) messages from \(name) queue")
+    }
+    
+    /**
+     * 获取详细统计信息
+     */
+    func getDetailedStatistics() -> [String: Any] {
+        return [
+            "id": id.uuidString,
+            "name": name,
+            "state": String(describing: state),
+            "messagesProcessed": statistics.messagesProcessed,
+            "messagesQueued": statistics.messagesQueued,
+            "averageProcessingTime": statistics.averageProcessingTime * 1000, // ms
+            "errorCount": statistics.errorCount,
+            "uptime": Date().timeIntervalSince(startTime),
+            "lastProcessedAt": statistics.lastProcessedAt?.timeIntervalSince1970 ?? 0
+        ]
+    }
+}
+
+// MARK: - Actor错误类型
+
+enum ActorError: Error, LocalizedError {
+    case actorStopped
+    case messageProcessingFailed(Error)
+    case invalidMessage(String)
+    case timeout
+    
+    var errorDescription: String? {
+        switch self {
+        case .actorStopped:
+            return "Actor has been stopped"
+        case .messageProcessingFailed(let error):
+            return "Message processing failed: \(error.localizedDescription)"
+        case .invalidMessage(let message):
+            return "Invalid message: \(message)"
+        case .timeout:
+            return "Operation timed out"
+        }
+    }
+}
+
+// MARK: - Actor系统管理器
+
+/**
+ * Actor系统管理器
+ * 
+ * 管理所有Actor的生命周期，提供Actor发现和通信功能
+ */
+@MainActor
+class ActorSystem: ObservableObject {
+    static let shared = ActorSystem()
+    
+    /// 注册的Actor列表
+    @Published private(set) var actors: [String: any ActorProtocol] = [:]
+    
+    private let logger = Logger(subsystem: "fit_wise_ai", category: "ActorSystem")
+    
+    private init() {
+        logger.info("ActorSystem initialized")
+    }
+    
+    /**
+     * 注册Actor到系统
+     */
+    func register(_ actor: any ActorProtocol) async {
+        actors[actor.name] = actor
+        await actor.start()
+        logger.info("Actor registered and started: \(actor.name)")
+    }
+    
+    /**
+     * 注销Actor
+     */
+    func unregister(_ name: String) async {
+        if let actor = actors[name] {
+            await actor.stop()
+            actors.removeValue(forKey: name)
+            logger.info("Actor unregistered: \(name)")
+        }
+    }
+    
+    /**
+     * 获取Actor引用
+     */
+    func getActor(_ name: String) -> (any ActorProtocol)? {
+        return actors[name]
+    }
+    
+    /**
+     * 向特定Actor发送消息
+     */
+    func tell(_ actorName: String, message: any ActorMessage) async {
+        guard let actor = actors[actorName] else {
+            logger.error("Actor not found: \(actorName)")
+            return
+        }
+        
+        await actor.tell(message)
+    }
+    
+    /**
+     * 停止所有Actor
+     */
+    func stopAll() async {
+        for actor in actors.values {
+            await actor.stop()
+        }
+        actors.removeAll()
+        logger.info("All actors stopped")
+    }
+    
+    /**
+     * 获取系统统计信息
+     */
+    func getSystemStatistics() -> [String: Any] {
+        var stats: [String: Any] = [:]
+        
+        for (name, actor) in actors {
+            if let baseActor = actor as? BaseActor {
+                stats[name] = baseActor.getDetailedStatistics()
+            }
+        }
+        
+        return [
+            "totalActors": actors.count,
+            "actors": stats,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+    }
+}

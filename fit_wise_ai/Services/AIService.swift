@@ -15,10 +15,32 @@ import Foundation
  */
 @MainActor
 class AIService: ObservableObject {
-    private let baseURL = "https://api.openai.com/v1/chat/completions"
+    // 默认OpenAI API地址
+    private let defaultBaseURL = "https://api.openai.com/v1/chat/completions"
+    
+    private var baseURL: String {
+        let savedBaseURL = UserDefaults.standard.string(forKey: "ai_base_url") ?? ""
+        if savedBaseURL.isEmpty {
+            return defaultBaseURL
+        }
+        // 确保URL以正确的端点结尾
+        if savedBaseURL.hasSuffix("/chat/completions") {
+            return savedBaseURL
+        } else if savedBaseURL.hasSuffix("/") {
+            return savedBaseURL + "chat/completions"
+        } else {
+            return savedBaseURL + "/chat/completions"
+        }
+    }
     
     private var apiKey: String {
         UserDefaults.standard.string(forKey: "openai_api_key") ?? ""
+    }
+    
+    /// 获取当前配置的服务提供商信息
+    var currentProvider: AIProvider {
+        let baseURLString = UserDefaults.standard.string(forKey: "ai_base_url") ?? ""
+        return AIProvider.from(baseURL: baseURLString)
     }
     
     /// AI建议结果
@@ -199,7 +221,7 @@ class AIService: ObservableObject {
      */
     private func callOpenAIAPI(prompt: String) async throws -> [AIAdvice] {
         guard let url = URL(string: baseURL) else {
-            throw AIServiceError.invalidURL
+            throw NSError(domain: "AIService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
         }
         
         // 构建请求体
@@ -213,14 +235,23 @@ class AIService: ObservableObject {
             temperature: 0.7
         )
         
+        // 根据不同的API提供商设置请求头
+        var headers = ["Content-Type": "application/json"]
+        
+        // 根据baseURL判断API提供商类型并设置相应的认证头
+        if baseURL.contains("api.anthropic.com") {
+            headers["x-api-key"] = apiKey
+            headers["anthropic-version"] = "2023-06-01"
+        } else {
+            // OpenAI兼容格式
+            headers["Authorization"] = "Bearer \(apiKey)"
+        }
+        
         // 使用网络服务进行API调用，获得重试和错误处理能力
         let response: OpenAIResponse = try await networkService.performRequest(
             url: url,
             method: .POST,
-            headers: [
-                "Authorization": "Bearer \(apiKey)",
-                "Content-Type": "application/json"
-            ],
+            headers: headers,
             body: try JSONEncoder().encode(requestBody),
             responseType: OpenAIResponse.self,
             maxRetries: 2
@@ -228,7 +259,7 @@ class AIService: ObservableObject {
         
         // 解析响应
         guard let content = response.choices.first?.message.content else {
-            throw AIServiceError.noResponse
+            throw NSError(domain: "AIService", code: -2, userInfo: [NSLocalizedDescriptionKey: "No Response"])
         }
         
         return parseAIResponse(content)
@@ -610,8 +641,33 @@ struct OpenAIChoice: Codable {
 }
 
 // MARK: - Error Types
-enum AIServiceError: Error {
-    case invalidURL
-    case noResponse
-    case decodingError
+// 使用EventDrivenAIService中定义的AIServiceError
+
+// MARK: - AI Provider Types
+struct AIProvider {
+    let name: String
+    let baseURL: String
+    let isCustom: Bool
+    
+    static let openAI = AIProvider(name: "OpenAI", baseURL: "https://api.openai.com/v1", isCustom: false)
+    static let anthropic = AIProvider(name: "Anthropic Claude", baseURL: "https://api.anthropic.com/v1", isCustom: false)
+    static let deepseek = AIProvider(name: "DeepSeek", baseURL: "https://api.deepseek.com/v1", isCustom: false)
+    static let moonshot = AIProvider(name: "Moonshot AI", baseURL: "https://api.moonshot.cn/v1", isCustom: false)
+    static let custom = AIProvider(name: "自定义", baseURL: "", isCustom: true)
+    
+    static let allProviders: [AIProvider] = [.openAI, .anthropic, .deepseek, .moonshot, .custom]
+    
+    static func from(baseURL: String) -> AIProvider {
+        if baseURL.isEmpty {
+            return .openAI
+        }
+        
+        for provider in allProviders where !provider.isCustom {
+            if baseURL.contains(provider.baseURL.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "/v1", with: "")) {
+                return provider
+            }
+        }
+        
+        return AIProvider(name: "自定义", baseURL: baseURL, isCustom: true)
+    }
 }

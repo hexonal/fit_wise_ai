@@ -17,33 +17,68 @@ import SwiftUI
  * - 设置：应用配置和用户偏好设置
  */
 struct ContentView: View {
+    @State private var selectedTab = 0
+    @Environment(\.colorScheme) var colorScheme
+    
     var body: some View {
-        TabView {
-            // 首页标签 - 健康数据展示
-            HomeView()
-                .tabItem {
-                    Image(systemName: "house.fill")
-                    Text("首页")
-                }
+        ZStack {
+            // AI主题渐变背景
+            (colorScheme == .dark ? AITheme.darkBackgroundGradient : AITheme.backgroundGradient)
+                .ignoresSafeArea()
             
-            // AI建议标签 - 智能健康建议
-            AIAdviceView()
-                .tabItem {
-                    Image(systemName: "sparkles")
-                    Text("AI建议")
-                }
-            
-            // 设置标签 - 应用配置界面
-            SettingsView()
-                .tabItem {
-                    Image(systemName: "gear")
-                    Text("设置")
-                }
+            TabView(selection: $selectedTab) {
+                // 首页标签 - 健康数据展示
+                HomeView()
+                    .tabItem {
+                        Image(systemName: selectedTab == 0 ? "house.fill" : "house")
+                        Text("首页")
+                    }
+                    .tag(0)
+                
+                // AI建议标签 - 智能健康建议
+                AIAdviceView()
+                    .tabItem {
+                        Image(systemName: selectedTab == 1 ? "sparkles" : "sparkles")
+                        Text("AI建议")
+                    }
+                    .tag(1)
+                
+                // 设置标签 - 应用配置界面
+                SettingsView()
+                    .tabItem {
+                        Image(systemName: selectedTab == 2 ? "gear.circle.fill" : "gear.circle")
+                        Text("设置")
+                    }
+                    .tag(2)
+            }
+            .tint(AITheme.accent) // 使用AI主题色
+            .background(.clear) // 透明背景以显示渐变
+            .onAppear {
+                // 自定义TabBar外观
+                setupTabBarAppearance()
+            }
         }
-        .accentColor(.blue) // 设置标签栏的主题色为蓝色
+        .animation(.easeInOut(duration: 0.3), value: selectedTab)
+    }
+    
+    private func setupTabBarAppearance() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithTransparentBackground()
+        appearance.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.8)
+        
+        // 设置选中和未选中状态的颜色
+        appearance.stackedLayoutAppearance.selected.iconColor = UIColor(AITheme.accent)
+        appearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(AITheme.accent)]
+        
+        appearance.stackedLayoutAppearance.normal.iconColor = UIColor.systemGray
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.systemGray]
+        
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
     }
 }
 
 #Preview {
     ContentView()
+        .environmentObject(HealthKitService())
 }

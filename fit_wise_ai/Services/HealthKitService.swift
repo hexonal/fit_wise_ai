@@ -30,7 +30,7 @@ enum HealthKitAuthorizationStatus {
 }
 
 class HealthKitService: ObservableObject {
-    private let healthStore = HKHealthStore()
+    let healthStore = HKHealthStore()
     
     @Published var isAuthorized = false
     @Published var healthData = HealthData()

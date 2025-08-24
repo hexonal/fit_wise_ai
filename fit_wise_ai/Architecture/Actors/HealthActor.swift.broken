@@ -1,0 +1,581 @@
+//
+//  HealthActor.swift
+//  fit_wise_ai
+//
+//  Created by AI on 2025/8/24.
+//
+
+import Foundation
+import HealthKit
+import OSLog
+
+/**
+ * 健康数据相关消息定义
+ */
+
+/// 请求HealthKit权限消息
+struct RequestHealthPermissionMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "RequestHealthPermission"
+    let permissions: [HKObjectType]
+}
+
+/// 获取今日健康数据消息
+struct FetchTodayHealthDataMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "FetchTodayHealthData"
+}
+
+/// 获取历史健康数据消息
+struct FetchHistoricalHealthDataMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "FetchHistoricalHealthData"
+    let dateRange: DateInterval
+}
+
+/// 获取特定指标数据消息
+struct FetchSpecificMetricMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "FetchSpecificMetric"
+    let metricType: String
+    let dateRange: DateInterval
+}
+
+/// 设置健康目标消息
+struct SetHealthGoalMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "SetHealthGoal"
+    let goalType: String
+    let targetValue: Double
+    let timeFrame: String
+}
+
+/// 检查健康目标达成消息
+struct CheckHealthGoalMessage: ActorMessage {
+    let id = UUID()
+    let timestamp = Date()
+    let messageType = "CheckHealthGoal"
+    let goalType: String
+}
+
+/**
+ * 健康Actor响应类型
+ */
+struct HealthPermissionResponse: Sendable {
+    let isAuthorized: Bool
+    let authorizationStatus: [String: String]
+    let deniedPermissions: [String]
+}
+
+struct HealthDataResponse: Sendable {
+    let healthData: HealthDataSnapshot
+    let fetchDuration: TimeInterval
+    let dataQuality: String // "complete", "partial", "minimal"
+}
+
+struct HistoricalHealthDataResponse: Sendable {
+    let historicalData: [HealthDataSnapshot]
+    let dateRange: DateInterval
+    let dataCompleteness: Double // 0.0 - 1.0
+}
+
+struct HealthGoalResponse: Sendable {
+    let goalSet: Bool
+    let goalType: String
+    let targetValue: Double
+    let currentValue: Double?
+}
+
+struct HealthGoalCheckResponse: Sendable {
+    let isAchieved: Bool
+    let goalType: String
+    let targetValue: Double
+    let currentValue: Double
+    let progress: Double // 0.0 - 1.0+
+}
+
+/**
+ * 健康Actor
+ * 
+ * 专门处理健康数据相关的业务逻辑，包括：
+ * - HealthKit权限管理
+ * - 健康数据获取和处理
+ * - 健康目标设定和跟踪
+ * - 健康数据质量评估
+ */
+actor HealthActor: ActorProtocol {
+    
+    // MARK: - ActorProtocol Properties
+    nonisolated let id = UUID()
+    nonisolated let name = "HealthActor"
+    private var state: ActorState = .idle
+    private var statistics = ActorStatistics()
+    private let logger: Logger
+    
+    // MARK: - Properties
+    
+    /// HealthKit服务实例
+    private let healthKitService: HealthKitService
+    /// 当前健康数据状态
+    private var currentHealthData: HealthDataSnapshot?
+    /// 健康目标存储
+    private var healthGoals: [String: HealthGoal] = [:]
+    /// 数据获取缓存（避免频繁查询）
+    private var dataCache: [String: CachedHealthData] = [:]
+    /// 缓存过期时间（5分钟）
+    private let cacheExpirationTime: TimeInterval = 300
+    
+    // MARK: - Initialization
+    
+    override init(name: String = "HealthActor") {
+        self.healthKitService = HealthKitService()
+        super.init(name: name)
+        
+        // 设置事件监听
+        Task {
+            await setupEventSubscriptions()
+        }
+    }
+    
+    // MARK: - Event Subscriptions
+    
+    private func setupEventSubscriptions() async {
+        let eventBus = EventBus.shared
+        
+        // 监听HealthKit权限变化事件
+        eventBus.subscribe(to: HealthPermissionGrantedEvent.self) { [weak self] event in
+            await self?.handlePermissionGrantedEvent(event)
+            return .success
+        }
+        
+        // 监听健康数据更新事件
+        eventBus.subscribe(to: HealthDataUpdatedEvent.self) { [weak self] event in
+            await self?.handleHealthDataUpdatedEvent(event)
+            return .success
+        }
+    }
+    
+    // MARK: - Message Handling
+    
+    override func handleMessage(_ message: any ActorMessage) async throws -> Any {
+        logger.debug("HealthActor processing message: \(message.messageType)")
+        
+        switch message {
+        case let msg as RequestHealthPermissionMessage:
+            return try await handleRequestHealthPermission(msg)
+        case is FetchTodayHealthDataMessage:
+            return try await handleFetchTodayHealthData()
+        case let msg as FetchHistoricalHealthDataMessage:
+            return try await handleFetchHistoricalHealthData(msg)
+        case let msg as FetchSpecificMetricMessage:
+            return try await handleFetchSpecificMetric(msg)
+        case let msg as SetHealthGoalMessage:
+            return try await handleSetHealthGoal(msg)
+        case let msg as CheckHealthGoalMessage:
+            return try await handleCheckHealthGoal(msg)
+        default:
+            return try await super.handleMessage(message)
+        }
+    }
+    
+    // MARK: - Permission Handling
+    
+    private func handleRequestHealthPermission(_ message: RequestHealthPermissionMessage) async throws -> HealthPermissionResponse {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        // 发布权限请求开始事件
+        await publishEvent(HealthPermissionRequestedEvent(
+            requestedPermissions: message.permissions,
+            source: name
+        ))
+        
+        // 执行权限请求
+        await healthKitService.requestAuthorization()
+        
+        // 检查权限状态
+        let authorizationStatus = checkAuthorizationStatus(for: message.permissions)
+        let deniedPermissions = getDeniedPermissions(from: authorizationStatus)
+        
+        let response = HealthPermissionResponse(
+            isAuthorized: healthKitService.isAuthorized,
+            authorizationStatus: authorizationStatus,
+            deniedPermissions: deniedPermissions
+        )
+        
+        // 发布权限结果事件
+        if response.isAuthorized {
+            await publishEvent(HealthPermissionGrantedEvent(
+                authorizationStatus: authorizationStatus,
+                source: name
+            ))
+        } else {
+            await publishEvent(HealthPermissionDeniedEvent(
+                deniedPermissions: deniedPermissions,
+                reason: "User denied permissions",
+                source: name
+            ))
+        }
+        
+        let duration = CFAbsoluteTimeGetCurrent() - startTime
+        logger.info("Health permission request completed in \(String(format: "%.2f", duration * 1000))ms, authorized: \(response.isAuthorized)")
+        
+        return response
+    }
+    
+    private func checkAuthorizationStatus(for permissions: [HKObjectType]) -> [String: String] {
+        var status: [String: String] = [:]
+        
+        for permission in permissions {
+            let authStatus = healthKitService.healthStore.authorizationStatus(for: permission)
+            switch authStatus {
+            case .notDetermined:
+                status[permission.identifier] = "notDetermined"
+            case .sharingDenied:
+                status[permission.identifier] = "denied"
+            case .sharingAuthorized:
+                status[permission.identifier] = "authorized"
+            @unknown default:
+                status[permission.identifier] = "unknown"
+            }
+        }
+        
+        return status
+    }
+    
+    private func getDeniedPermissions(from authStatus: [String: String]) -> [String] {
+        return authStatus.compactMap { key, value in
+            value == "denied" ? key : nil
+        }
+    }
+    
+    // MARK: - Data Fetching
+    
+    private func handleFetchTodayHealthData() async throws -> HealthDataResponse {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let cacheKey = "today_\(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970)"
+        
+        // 检查缓存
+        if let cachedData = getCachedData(for: cacheKey) {
+            logger.debug("Returning cached today's health data")
+            return HealthDataResponse(
+                healthData: cachedData.snapshot,
+                fetchDuration: 0,
+                dataQuality: cachedData.quality
+            )
+        }
+        
+        // 发布数据获取开始事件
+        let today = Calendar.current.startOfDay(for: Date())
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
+        let dateRange = DateInterval(start: today, end: tomorrow)
+        
+        await publishEvent(HealthDataFetchStartedEvent(
+            dataTypes: ["steps", "heartRate", "activeEnergy", "distance", "workoutTime"],
+            dateRange: dateRange,
+            source: name
+        ))
+        
+        do {
+            // 获取健康数据
+            await healthKitService.fetchTodayHealthData()
+            let healthData = HealthDataSnapshot(from: healthKitService.healthData)
+            
+            // 评估数据质量
+            let quality = assessDataQuality(healthData)
+            
+            // 缓存数据
+            cacheData(healthData, for: cacheKey, quality: quality)
+            
+            // 更新当前状态
+            currentHealthData = healthData
+            
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            
+            // 发布数据获取完成事件
+            await publishEvent(HealthDataFetchCompletedEvent(
+                healthData: healthData,
+                fetchDuration: duration,
+                source: name
+            ))
+            
+            logger.info("Today's health data fetched in \(String(format: "%.2f", duration * 1000))ms, quality: \(quality)")
+            
+            return HealthDataResponse(
+                healthData: healthData,
+                fetchDuration: duration,
+                dataQuality: quality
+            )
+            
+        } catch {
+            await publishEvent(HealthDataFetchFailedEvent(
+                error: error,
+                failedDataTypes: ["steps", "heartRate", "activeEnergy", "distance", "workoutTime"],
+                source: name
+            ))
+            
+            throw ActorError.messageProcessingFailed(error)
+        }
+    }
+    
+    private func handleFetchHistoricalHealthData(_ message: FetchHistoricalHealthDataMessage) async throws -> HistoricalHealthDataResponse {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let cacheKey = "historical_\(message.dateRange.start.timeIntervalSince1970)_\(message.dateRange.end.timeIntervalSince1970)"
+        
+        // 检查缓存（历史数据缓存时间更长）
+        if let cachedData = getCachedData(for: cacheKey, maxAge: 3600) { // 1小时缓存
+            logger.debug("Returning cached historical health data")
+            return HistoricalHealthDataResponse(
+                historicalData: [cachedData.snapshot],
+                dateRange: message.dateRange,
+                dataCompleteness: 1.0
+            )
+        }
+        
+        // 发布历史数据获取开始事件
+        await publishEvent(HealthDataFetchStartedEvent(
+            dataTypes: ["steps", "heartRate", "activeEnergy", "distance", "workoutTime"],
+            dateRange: message.dateRange,
+            source: name
+        ))
+        
+        do {
+            // 获取历史数据
+            await healthKitService.fetchWeeklyHealthData()
+            let historicalData = healthKitService.weeklyHealthData.map { HealthDataSnapshot(from: $0) }
+            
+            // 过滤指定日期范围内的数据
+            let filteredData = historicalData.filter { 
+                message.dateRange.contains($0.date) 
+            }
+            
+            // 计算数据完整性
+            let expectedDays = Calendar.current.dateComponents([.day], from: message.dateRange.start, to: message.dateRange.end).day ?? 0
+            let dataCompleteness = min(1.0, Double(filteredData.count) / Double(max(1, expectedDays)))
+            
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            
+            logger.info("Historical health data fetched: \(filteredData.count) days in \(String(format: "%.2f", duration * 1000))ms, completeness: \(String(format: "%.1f", dataCompleteness * 100))%")
+            
+            return HistoricalHealthDataResponse(
+                historicalData: filteredData,
+                dateRange: message.dateRange,
+                dataCompleteness: dataCompleteness
+            )
+            
+        } catch {
+            await publishEvent(HealthDataFetchFailedEvent(
+                error: error,
+                failedDataTypes: ["weekly_data"],
+                source: name
+            ))
+            
+            throw ActorError.messageProcessingFailed(error)
+        }
+    }
+    
+    private func handleFetchSpecificMetric(_ message: FetchSpecificMetricMessage) async throws -> Any {
+        // 根据指标类型获取特定数据
+        switch message.metricType.lowercased() {
+        case "steps":
+            return try await fetchStepsData(for: message.dateRange)
+        case "heartrate":
+            return try await fetchHeartRateData(for: message.dateRange)
+        case "calories", "activeenergy":
+            return try await fetchActiveEnergyData(for: message.dateRange)
+        case "distance":
+            return try await fetchDistanceData(for: message.dateRange)
+        case "workout":
+            return try await fetchWorkoutData(for: message.dateRange)
+        default:
+            throw ActorError.invalidMessage("Unsupported metric type: \(message.metricType)")
+        }
+    }
+    
+    // MARK: - Goal Management
+    
+    private func handleSetHealthGoal(_ message: SetHealthGoalMessage) async throws -> HealthGoalResponse {
+        let goal = HealthGoal(
+            type: message.goalType,
+            targetValue: message.targetValue,
+            timeFrame: message.timeFrame,
+            createdAt: Date()
+        )
+        
+        healthGoals[message.goalType] = goal
+        
+        // 发布目标设定事件
+        await publishEvent(HealthGoalSetEvent(
+            goalType: message.goalType,
+            targetValue: message.targetValue,
+            timeFrame: message.timeFrame,
+            source: name
+        ))
+        
+        logger.info("Health goal set: \(message.goalType) = \(message.targetValue) (\(message.timeFrame))")
+        
+        return HealthGoalResponse(
+            goalSet: true,
+            goalType: message.goalType,
+            targetValue: message.targetValue,
+            currentValue: getCurrentValueForGoal(message.goalType)
+        )
+    }
+    
+    private func handleCheckHealthGoal(_ message: CheckHealthGoalMessage) async throws -> HealthGoalCheckResponse {
+        guard let goal = healthGoals[message.goalType] else {
+            throw ActorError.invalidMessage("Goal not found: \(message.goalType)")
+        }
+        
+        let currentValue = getCurrentValueForGoal(message.goalType)
+        let progress = currentValue / goal.targetValue
+        let isAchieved = progress >= 1.0
+        
+        if isAchieved {
+            // 发布目标达成事件
+            await publishEvent(HealthGoalAchievedEvent(
+                goalType: message.goalType,
+                targetValue: goal.targetValue,
+                actualValue: currentValue,
+                achievedAt: Date(),
+                source: name
+            ))
+        }
+        
+        return HealthGoalCheckResponse(
+            isAchieved: isAchieved,
+            goalType: message.goalType,
+            targetValue: goal.targetValue,
+            currentValue: currentValue,
+            progress: progress
+        )
+    }
+    
+    // MARK: - Event Handlers
+    
+    private func handlePermissionGrantedEvent(_ event: HealthPermissionGrantedEvent) async {
+        logger.info("Permission granted event received, refreshing health data")
+        
+        // 权限获得后自动获取今日数据
+        do {
+            let _ = try await handleFetchTodayHealthData()
+        } catch {
+            logger.error("Failed to fetch health data after permission granted: \(error)")
+        }
+    }
+    
+    private func handleHealthDataUpdatedEvent(_ event: HealthDataUpdatedEvent) async {
+        // 更新内部状态
+        currentHealthData = event.currentData
+        
+        // 检查所有健康目标
+        for goalType in healthGoals.keys {
+            do {
+                let message = CheckHealthGoalMessage()
+                let _ = try await handleCheckHealthGoal(CheckHealthGoalMessage())
+            } catch {
+                logger.error("Failed to check goal \(goalType): \(error)")
+            }
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func assessDataQuality(_ healthData: HealthDataSnapshot) -> String {
+        var score = 0
+        
+        if healthData.steps > 0 { score += 1 }
+        if healthData.heartRate != nil { score += 1 }
+        if healthData.activeEnergyBurned > 0 { score += 1 }
+        if healthData.workoutTime > 0 { score += 1 }
+        if healthData.distanceWalkingRunning > 0 { score += 1 }
+        
+        switch score {
+        case 4...5: return "complete"
+        case 2...3: return "partial"
+        default: return "minimal"
+        }
+    }
+    
+    private func cacheData(_ healthData: HealthDataSnapshot, for key: String, quality: String) {
+        dataCache[key] = CachedHealthData(
+            snapshot: healthData,
+            quality: quality,
+            cachedAt: Date()
+        )
+    }
+    
+    private func getCachedData(for key: String, maxAge: TimeInterval = 300) -> CachedHealthData? {
+        guard let cached = dataCache[key] else { return nil }
+        
+        if Date().timeIntervalSince(cached.cachedAt) > maxAge {
+            dataCache.removeValue(forKey: key)
+            return nil
+        }
+        
+        return cached
+    }
+    
+    private func getCurrentValueForGoal(_ goalType: String) -> Double {
+        guard let currentData = currentHealthData else { return 0 }
+        
+        switch goalType.lowercased() {
+        case "steps":
+            return Double(currentData.steps)
+        case "calories", "activeenergy":
+            return currentData.activeEnergyBurned
+        case "distance":
+            return currentData.distanceWalkingRunning / 1000 // km
+        case "workout":
+            return currentData.workoutTime / 60 // minutes
+        default:
+            return 0
+        }
+    }
+    
+    // MARK: - Specific Metric Fetchers
+    
+    private func fetchStepsData(for dateRange: DateInterval) async throws -> [String: Any] {
+        // 实现具体的步数数据获取逻辑
+        return ["steps": 0, "dateRange": dateRange.description]
+    }
+    
+    private func fetchHeartRateData(for dateRange: DateInterval) async throws -> [String: Any] {
+        // 实现具体的心率数据获取逻辑
+        return ["heartRate": 0, "dateRange": dateRange.description]
+    }
+    
+    private func fetchActiveEnergyData(for dateRange: DateInterval) async throws -> [String: Any] {
+        // 实现具体的活动能量数据获取逻辑
+        return ["activeEnergy": 0, "dateRange": dateRange.description]
+    }
+    
+    private func fetchDistanceData(for dateRange: DateInterval) async throws -> [String: Any] {
+        // 实现具体的距离数据获取逻辑
+        return ["distance": 0, "dateRange": dateRange.description]
+    }
+    
+    private func fetchWorkoutData(for dateRange: DateInterval) async throws -> [String: Any] {
+        // 实现具体的运动数据获取逻辑
+        return ["workoutTime": 0, "dateRange": dateRange.description]
+    }
+}
+
+// MARK: - Support Models
+
+private struct HealthGoal {
+    let type: String
+    let targetValue: Double
+    let timeFrame: String
+    let createdAt: Date
+}
+
+private struct CachedHealthData {
+    let snapshot: HealthDataSnapshot
+    let quality: String
+    let cachedAt: Date
+}
