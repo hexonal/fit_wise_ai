@@ -61,20 +61,24 @@ struct HomeView: View {
                                         )
                                         
                                         // 7天数据趋势图表（自适应高度）
-                                        let weeklyData = healthKitService.weeklyHealthData.isEmpty ? generateMockWeeklyData() : healthKitService.weeklyHealthData
-                                        AdaptiveWeeklyChartsView(
-                                            weeklyData: weeklyData, 
-                                            selectedTab: $selectedTab,
-                                            geometry: geometry
-                                        )
-                                        
-                                        // 数据详情列表（根据屏幕大小自适应显示）
-                                        if !isCompactLayout(for: geometry) {
-                                            // 非紧凑布局显示完整的数据列表
-                                            FullWeeklyDataView(weeklyData: weeklyData)
+                                        if !healthKitService.weeklyHealthData.isEmpty {
+                                            AdaptiveWeeklyChartsView(
+                                                weeklyData: healthKitService.weeklyHealthData, 
+                                                selectedTab: $selectedTab,
+                                                geometry: geometry
+                                            )
+                                            
+                                            // 数据详情列表（根据屏幕大小自适应显示）
+                                            if !isCompactLayout(for: geometry) {
+                                                // 非紧凑布局显示完整的数据列表
+                                                FullWeeklyDataView(weeklyData: healthKitService.weeklyHealthData)
+                                            } else {
+                                                // 紧凑布局时显示简化版本
+                                                CompactWeeklyDataView(weeklyData: healthKitService.weeklyHealthData, geometry: geometry)
+                                            }
                                         } else {
-                                            // 紧凑布局时显示简化版本
-                                            CompactWeeklyDataView(weeklyData: weeklyData, geometry: geometry)
+                                            // 无数据时显示提示
+                                            NoDataView()
                                         }
                                     }
                                 } else {
@@ -185,35 +189,6 @@ struct HomeView: View {
         }
     }
     
-    /// 生成模拟的7天健康数据（用于无数据时显示示例）
-    private func generateMockWeeklyData() -> [HealthData] {
-        let calendar = Calendar.current
-        let today = Date()
-        var mockData: [HealthData] = []
-        
-        for i in 0..<7 {
-            let date = calendar.date(byAdding: .day, value: -i, to: today) ?? today
-            let dayStart = calendar.startOfDay(for: date)
-            
-            // 生成模拟数据（模拟一个活跃用户的数据）
-            let steps = Int.random(in: 6000...15000)
-            let heartRate = Double.random(in: 70...90)
-            let activeEnergy = Double.random(in: 200...500)
-            let workoutTime = Double.random(in: 1800...3600) // 30-60分钟
-            let distance = Double.random(in: 3000...8000)
-            
-            mockData.append(HealthData(
-                date: dayStart,
-                steps: steps,
-                heartRate: heartRate,
-                activeEnergyBurned: activeEnergy,
-                workoutTime: workoutTime,
-                distanceWalkingRunning: distance
-            ))
-        }
-        
-        return mockData.sorted { $0.date < $1.date }
-    }
 }
 
 // MARK: - 自适应组件
@@ -624,6 +599,34 @@ struct CompactDataRow: View {
         .padding(.horizontal, AISpacing.sm)
         .background(isToday ? AITheme.accent.opacity(0.08) : AITheme.surface)
         .cornerRadius(AIRadius.sm)
+    }
+}
+
+// MARK: - 无数据视图
+
+/**
+ * 无数据提示视图
+ */
+struct NoDataView: View {
+    var body: some View {
+        AICard {
+            VStack(spacing: AISpacing.md) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 48))
+                    .foregroundStyle(AITheme.primaryGradient)
+                
+                Text("暂无健康数据")
+                    .font(AITypography.title2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(AITheme.textPrimary)
+                
+                Text("开始使用设备记录您的健康数据，\n或手动添加健康记录")
+                    .font(AITypography.body)
+                    .foregroundColor(AITheme.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(AISpacing.xl)
+        }
     }
 }
 
